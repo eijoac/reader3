@@ -6,13 +6,14 @@ import os
 import pickle
 import shutil
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 from urllib.parse import unquote
 
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup, Comment
+from bs4.element import Tag
 
 # --- Data structures ---
 
@@ -172,6 +173,121 @@ def extract_metadata_robust(book_obj) -> BookMetadata:
 
 # --- Main Conversion Logic ---
 
+def _flatten_toc(entries: List[TOCEntry]) -> List[TOCEntry]:
+    flat: List[TOCEntry] = []
+    for e in entries:
+        flat.append(e)
+        if e.children:
+            flat.extend(_flatten_toc(e.children))
+    return flat
+
+
+def _find_anchor_tag(soup: BeautifulSoup, anchor: str):
+    if not anchor:
+        return None
+    tag = soup.find(id=anchor)
+    if tag:
+        return tag
+    # Fallback for name="..."
+    return soup.find(attrs={"name": anchor})
+
+
+def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], stop_anchors: List[str]) -> str:
+    """
+    Returns an HTML fragment starting at `start_anchor` (or top of body when None)
+    and ending right before the next occurrence of any of `stop_anchors`.
+    Best-effort: works well when chapters start at headers or elements with id.
+    """
+    body = soup.find('body')
+    if not body:
+        return str(soup)
+
+    # If no start anchor: start at beginning of body
+    if not start_anchor:
+        start_node = None
+    else:
+        start_tag = _find_anchor_tag(soup, start_anchor)
+        if not start_tag:
+            # Anchor not found; return entire body as fallback
+            return "".join(str(x) for x in body.contents)
+        # Prefer the header/section/div that contains the anchor as the visual start
+        if start_tag.name in ['h1', 'h2', 'h3', 'h4', 'section', 'div', 'article']:
+            start_node = start_tag
+        else:
+            start_node = start_tag
+
+    # Determine the next stop tag (first that appears after start)
+    stop_tag_candidates = []
+    for a in stop_anchors:
+        t = _find_anchor_tag(soup, a)
+        if t:
+            stop_tag_candidates.append(t)
+
+    # Helper to compare document order using next_elements
+    def comes_before(a_tag, b_tag) -> bool:
+        if a_tag is None or b_tag is None:
+            return False
+        it = a_tag.next_elements
+        for el in it:
+            if el == b_tag:
+                return True
+        return False
+
+    # Pick the earliest stop tag that comes after start
+    stop_tag: Optional[Any] = None
+    if start_node is None:
+        # From beginning, choose the first anchor in doc order
+        earliest = None
+        for cand in stop_tag_candidates:
+            if earliest is None or comes_before(cand, earliest):
+                earliest = cand
+        stop_tag = earliest
+    else:
+        for cand in stop_tag_candidates:
+            if comes_before(start_node, cand):
+                if stop_tag is None or comes_before(cand, stop_tag):
+                    stop_tag = cand
+
+    # Collect HTML between start and stop
+    html_parts: List[str] = []
+    collecting = False if start_node is not None else True
+
+    for child in body.children:
+        # We operate at the top level of body to avoid deep nested slicing issues
+        if not collecting and start_node is not None:
+            # Start when we reach start_node or it is contained within this child
+            if child == start_node or (isinstance(child, Tag) and child.find(id=start_anchor) is not None):
+                collecting = True
+
+        if collecting:
+            # Stop before stop_tag if it's this child or contained
+            if stop_tag is not None:
+                if child == stop_tag:
+                    break
+                if isinstance(child, Tag):
+                    # If the stop tag is inside this child, stop here
+                    stop_id = stop_tag.get('id') if hasattr(stop_tag, 'get') else None
+                    if stop_id and child.find(id=stop_id) is not None:
+                        break
+                    # As a fallback, check descendants identity
+                    try:
+                        for d in child.descendants:
+                            if d is stop_tag:
+                                raise StopIteration
+                    except StopIteration:
+                        break
+            html_parts.append(str(child))
+
+        # If starting at beginning, start collecting immediately
+        if start_node is None:
+            collecting = True
+
+    # Fallback: if nothing collected, return full body contents
+    if not html_parts:
+        return "".join(str(x) for x in body.contents)
+    return "".join(html_parts)
+
+
 def process_epub(epub_path: str, output_dir: str) -> Book:
 
     # 1. Load Book
@@ -215,60 +331,86 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
     if not toc_structure:
         print("Warning: Empty TOC, building fallback from Spine...")
         toc_structure = get_fallback_toc(book)
+    flat_toc = _flatten_toc(toc_structure)
 
-    # 6. Process Content (Spine-based to preserve HTML validity)
+    # 6. Process Content based on TOC (split by anchors for one-chapter-at-a-time)
     print("Processing chapters...")
-    spine_chapters = []
+    spine_chapters: List[ChapterContent] = []
 
-    # We iterate over the spine (linear reading order)
-    for i, spine_item in enumerate(book.spine):
-        item_id, linear = spine_item
-        item = book.get_item_with_id(item_id)
-
-        if not item:
-            continue
-
+    # Pre-parse all document files once
+    doc_items: Dict[str, Any] = {}
+    soups: Dict[str, BeautifulSoup] = {}
+    for item in book.get_items():
         if item.get_type() == ebooklib.ITEM_DOCUMENT:
-            # Raw content
+            name = item.get_name()
+            doc_items[name] = item
             raw_content = item.get_content().decode('utf-8', errors='ignore')
             soup = BeautifulSoup(raw_content, 'html.parser')
 
-            # A. Fix Images
+            # Fix Images
             for img in soup.find_all('img'):
                 src = img.get('src', '')
-                if not src: continue
-
-                # Decode URL (part01/image%201.jpg -> part01/image 1.jpg)
+                if not src:
+                    continue
                 src_decoded = unquote(src)
                 filename = os.path.basename(src_decoded)
-
-                # Try to find in map
                 if src_decoded in image_map:
                     img['src'] = image_map[src_decoded]
                 elif filename in image_map:
                     img['src'] = image_map[filename]
 
-            # B. Clean HTML
+            # Clean HTML
             soup = clean_html_content(soup)
+            soups[name] = soup
 
-            # C. Extract Body Content only
-            body = soup.find('body')
-            if body:
-                # Extract inner HTML of body
-                final_html = "".join([str(x) for x in body.contents])
-            else:
-                final_html = str(soup)
+    # Build per-file anchor lists in TOC order
+    anchors_by_file: Dict[str, List[str]] = {}
+    for entry in flat_toc:
+        file_href = entry.file_href
+        anchors_by_file.setdefault(file_href, [])
+        if entry.anchor:
+            anchors_by_file[file_href].append(entry.anchor)
 
-            # D. Create Object
-            chapter = ChapterContent(
-                id=item_id,
-                href=item.get_name(), # Important: This links TOC to Content
-                title=f"Section {i+1}", # Fallback, real titles come from TOC
-                content=final_html,
-                text=extract_plain_text(soup),
-                order=i
-            )
-            spine_chapters.append(chapter)
+    # Generate chapters sequentially by TOC order
+    for idx, entry in enumerate(flat_toc):
+        file_href = entry.file_href
+        anchor = entry.anchor or None
+
+        soup = soups.get(file_href)
+        if not soup:
+            # Missing file; skip
+            continue
+
+        # Next anchors in the same file after this one
+        anchors_in_file = anchors_by_file.get(file_href, [])
+        # Compute the list of stop anchors: anchors that come after this anchor
+        stop_anchors: List[str] = []
+        if anchor:
+            try:
+                pos = anchors_in_file.index(anchor)
+                stop_anchors = anchors_in_file[pos + 1:]
+            except ValueError:
+                stop_anchors = anchors_in_file
+        else:
+            # If starting from top of file, any anchor in file can be a stop
+            stop_anchors = anchors_in_file
+
+        fragment_html = _slice_html_by_anchors(soup, anchor, stop_anchors)
+
+        # Extract plain text from the fragment
+        frag_soup = BeautifulSoup(fragment_html, 'html.parser')
+        text = extract_plain_text(frag_soup)
+
+        ch_href = file_href if not entry.anchor else f"{file_href}#{entry.anchor}"
+        chapter = ChapterContent(
+            id=f"{file_href}#{entry.anchor}" if entry.anchor else file_href,
+            href=ch_href,
+            title=entry.title or os.path.splitext(os.path.basename(file_href))[0],
+            content=fragment_html,
+            text=text,
+            order=len(spine_chapters)
+        )
+        spine_chapters.append(chapter)
 
     # 7. Final Assembly
     final_book = Book(

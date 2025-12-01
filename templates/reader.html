@@ -56,7 +56,7 @@
                         Ideally we match spine indices, but Reader 3 TOC maps to filenames.
                         We use a simple hash matching logic here.
                     -->
-                    {% set is_active = current_chapter.href == item.file_href %}
+                    {% set is_active = current_chapter.href == item.href %}
 
                     <!--
                        We need to find which linear chapter index (0, 1, 2) corresponds
@@ -78,7 +78,7 @@
 
                        BETTER FIX: Use JavaScript to match filenames.
                     -->
-                    <a href="#" onclick="findAndGo('{{ item.file_href }}')"
+                    <a href="#" onclick="findAndGo('{{ item.href }}')"
                        class="toc-link {% if is_active %}active{% endif %}">
                         {{ item.title }}
                     </a>
@@ -127,27 +127,24 @@
         const spineMap = {
             {% for ch in book.spine %}
             "{{ ch.href }}": {{ ch.order }},
+            "{{ ch.href.split('#')[0] }}": {{ ch.order }},
             {% endfor %}
         };
 
-        function findAndGo(filename) {
-            // The TOC usually has specific filenames e.g. "text/part001.html"
-            // Sometimes it has anchors "text/part001.html#header"
-            // We strip the anchor to find the page index
-            const cleanFile = filename.split('#')[0];
-            const anchor = filename.split('#')[1];
-
-            const idx = spineMap[cleanFile];
-
-            if (idx !== undefined) {
-                let url = "/read/{{ book_id }}/" + idx;
-                // If there was an anchor, we could try to scroll to it,
-                // but simple page loads often lose anchor position without extra JS.
-                // Let's just go to the page.
-                window.location.href = url;
-            } else {
-                console.log("Could not find index for", filename);
+        function findAndGo(target) {
+            // Try exact href (with anchor), then fallback to file-only
+            const idxExact = spineMap[target];
+            if (idxExact !== undefined) {
+                window.location.href = "/read/{{ book_id }}/" + idxExact;
+                return;
             }
+            const cleanFile = target.split('#')[0];
+            const idxFile = spineMap[cleanFile];
+            if (idxFile !== undefined) {
+                window.location.href = "/read/{{ book_id }}/" + idxFile;
+                return;
+            }
+            console.log("Could not find index for", target);
         }
     </script>
 </body>
