@@ -51,7 +51,8 @@ async def library_view(request: Request):
                         "id": item,
                         "title": book.metadata.title,
                         "author": ", ".join(book.metadata.authors),
-                        "chapters": len(book.spine)
+                        "chapters": len(book.spine),
+                        "has_cover": book.metadata.cover_image is not None
                     })
 
     return templates.TemplateResponse("library.html", {"request": request, "books": books})
@@ -86,6 +87,26 @@ async def read_chapter(request: Request, book_id: str, chapter_index: int):
         "prev_idx": prev_idx,
         "next_idx": next_idx
     })
+
+@app.get("/cover/{book_id}")
+async def serve_cover(book_id: str):
+    """
+    Serves the cover image for a book in the library view.
+    """
+    book = load_book_cached(book_id)
+    if not book or not book.metadata.cover_image:
+        raise HTTPException(status_code=404, detail="Cover not found")
+    
+    # Security check: ensure book_id is clean
+    safe_book_id = os.path.basename(book_id)
+    cover_filename = os.path.basename(book.metadata.cover_image)
+    
+    cover_path = os.path.join(BOOKS_DIR, safe_book_id, "images", cover_filename)
+    
+    if not os.path.exists(cover_path):
+        raise HTTPException(status_code=404, detail="Cover image file not found")
+    
+    return FileResponse(cover_path)
 
 @app.get("/read/{book_id}/images/{image_name}")
 async def serve_image(book_id: str, image_name: str):

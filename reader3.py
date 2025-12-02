@@ -52,6 +52,7 @@ class BookMetadata:
     date: Optional[str] = None
     identifiers: List[str] = field(default_factory=list)
     subjects: List[str] = field(default_factory=list)
+    cover_image: Optional[str] = None  # Relative path to cover image
 
 
 @dataclass
@@ -147,9 +148,78 @@ def get_fallback_toc(book_obj) -> List[TOCEntry]:
     return toc
 
 
+def extract_cover_image(book_obj, images_dir: str, image_map: Dict[str, str]) -> Optional[str]:
+    """
+    Extracts the cover image from the epub.
+    Tries multiple methods to find the cover.
+    Returns the relative path to the saved cover image.
+    """
+    # Method 1: Try to get cover from metadata
+    try:
+        cover_item = None
+        for item in book_obj.get_items():
+            if item.get_type() == ebooklib.ITEM_COVER:
+                cover_item = item
+                break
+        
+        if cover_item:
+            original_fname = os.path.basename(cover_item.get_name())
+            safe_fname = "cover_" + "".join([c for c in original_fname if c.isalpha() or c.isdigit() or c in '._-']).strip()
+            local_path = os.path.join(images_dir, safe_fname)
+            with open(local_path, 'wb') as f:
+                f.write(cover_item.get_content())
+            return f"images/{safe_fname}"
+    except Exception as e:
+        print(f"Method 1 (ITEM_COVER) failed: {e}")
+    
+    # Method 2: Check metadata for cover reference
+    try:
+        cover_meta = book_obj.get_metadata('OPF', 'cover')
+        if cover_meta:
+            cover_id = cover_meta[0][1].get('content') if cover_meta[0][1] else cover_meta[0][0]
+            if cover_id:
+                for item in book_obj.get_items():
+                    if item.get_id() == cover_id or item.get_name().endswith(cover_id):
+                        original_fname = os.path.basename(item.get_name())
+                        safe_fname = "cover_" + "".join([c for c in original_fname if c.isalpha() or c.isdigit() or c in '._-']).strip()
+                        local_path = os.path.join(images_dir, safe_fname)
+                        with open(local_path, 'wb') as f:
+                            f.write(item.get_content())
+                        return f"images/{safe_fname}"
+    except Exception as e:
+        print(f"Method 2 (metadata cover) failed: {e}")
+    
+    # Method 3: Look for common cover image names
+    cover_patterns = ['cover', 'Cover', 'COVER', 'front']
+    for item in book_obj.get_items():
+        if item.get_type() == ebooklib.ITEM_IMAGE:
+            name = item.get_name().lower()
+            if any(pattern.lower() in name for pattern in cover_patterns):
+                original_fname = os.path.basename(item.get_name())
+                safe_fname = "cover_" + "".join([c for c in original_fname if c.isalpha() or c.isdigit() or c in '._-']).strip()
+                local_path = os.path.join(images_dir, safe_fname)
+                with open(local_path, 'wb') as f:
+                    f.write(item.get_content())
+                return f"images/{safe_fname}"
+    
+    # Method 4: Get the first image as a fallback
+    for item in book_obj.get_items():
+        if item.get_type() == ebooklib.ITEM_IMAGE:
+            original_fname = os.path.basename(item.get_name())
+            safe_fname = "cover_" + "".join([c for c in original_fname if c.isalpha() or c.isdigit() or c in '._-']).strip()
+            local_path = os.path.join(images_dir, safe_fname)
+            with open(local_path, 'wb') as f:
+                f.write(item.get_content())
+            print("Warning: Using first image as cover (no explicit cover found)")
+            return f"images/{safe_fname}"
+    
+    return None
+
+
 def extract_metadata_robust(book_obj) -> BookMetadata:
     """
     Extracts metadata handling both single and list values.
+    Note: cover_image is set separately in process_epub after image extraction.
     """
     def get_list(key):
         data = book_obj.get_metadata('DC', key)
@@ -167,7 +237,8 @@ def extract_metadata_robust(book_obj) -> BookMetadata:
         publisher=get_one('publisher'),
         date=get_one('date'),
         identifiers=get_list('identifier'),
-        subjects=get_list('subject')
+        subjects=get_list('subject'),
+        cover_image=None  # Set later
     )
 
 
@@ -303,9 +374,18 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
     images_dir = os.path.join(output_dir, 'images')
     os.makedirs(images_dir, exist_ok=True)
 
-    # 4. Extract Images & Build Map
-    print("Extracting images...")
+    # 4. Extract Cover Image First
+    print("Extracting cover image...")
     image_map = {} # Key: internal_path, Value: local_relative_path
+    cover_path = extract_cover_image(book, images_dir, image_map)
+    if cover_path:
+        metadata.cover_image = cover_path
+        print(f"Cover extracted: {cover_path}")
+    else:
+        print("Warning: No cover image found")
+
+    # 5. Extract Images & Build Map
+    print("Extracting other images...")
 
     for item in book.get_items():
         if item.get_type() == ebooklib.ITEM_IMAGE:
@@ -325,7 +405,7 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
             image_map[item.get_name()] = rel_path
             image_map[original_fname] = rel_path
 
-    # 5. Process TOC
+    # 6. Process TOC
     print("Parsing Table of Contents...")
     toc_structure = parse_toc_recursive(book.toc)
     if not toc_structure:
@@ -333,7 +413,7 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
         toc_structure = get_fallback_toc(book)
     flat_toc = _flatten_toc(toc_structure)
 
-    # 6. Process Content based on TOC (split by anchors for one-chapter-at-a-time)
+    # 7. Process Content based on TOC (split by anchors for one-chapter-at-a-time)
     print("Processing chapters...")
     spine_chapters: List[ChapterContent] = []
 
@@ -412,7 +492,7 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
         )
         spine_chapters.append(chapter)
 
-    # 7. Final Assembly
+    # 8. Final Assembly
     final_book = Book(
         metadata=metadata,
         spine=spine_chapters,
@@ -452,4 +532,5 @@ if __name__ == "__main__":
     print(f"Authors: {', '.join(book_obj.metadata.authors)}")
     print(f"Physical Files (Spine): {len(book_obj.spine)}")
     print(f"TOC Root Items: {len(book_obj.toc)}")
-    print(f"Images extracted: {len(book_obj.images)}")
+    print(f"Cover Image Extracted: {'Yes' if book_obj.metadata.cover_image else 'No'}")
+    print(f"Other Images extracted: {len(book_obj.images)}")
