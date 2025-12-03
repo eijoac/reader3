@@ -9,7 +9,17 @@
         body { margin: 0; padding: 0; display: flex; height: 100vh; overflow: hidden; font-family: "Georgia", serif; background: #fff; }
 
         /* Sidebar */
-        #sidebar { width: 300px; background: #f8f9fa; border-right: 1px solid #e9ecef; overflow-y: auto; padding: 20px; flex-shrink: 0; }
+        #sidebar { 
+            width: 300px; 
+            background: #f8f9fa; 
+            border-right: 1px solid #e9ecef; 
+            overflow-y: auto; 
+            padding: 20px; 
+            flex-shrink: 0;
+            transition: transform 0.3s ease, width 0.3s ease;
+            position: relative;
+            z-index: 100;
+        }
         .nav-header { font-family: -apple-system, sans-serif; font-weight: bold; color: #495057; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #dee2e6; }
         .nav-home { display: block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-family: -apple-system, sans-serif; font-size: 0.9em; }
 
@@ -17,9 +27,25 @@
         ul.toc-list { list-style: none; padding-left: 0; margin: 0; }
         ul.toc-list ul { padding-left: 20px; } /* Indent children */
         li.toc-item { margin-bottom: 8px; }
-        a.toc-link { text-decoration: none; color: #495057; font-size: 0.95em; display: block; padding: 4px 0; line-height: 1.4; }
-        a.toc-link:hover { color: #000; text-decoration: underline; }
-        a.toc-link.active { color: #d63384; font-weight: bold; }
+        a.toc-link { 
+            text-decoration: none; 
+            color: #495057; 
+            font-size: 0.95em; 
+            display: block; 
+            padding: 6px 8px; 
+            line-height: 1.4;
+            border-radius: 4px;
+            transition: background 0.2s ease;
+        }
+        a.toc-link:hover { 
+            background: #e9ecef; 
+            color: #000; 
+        }
+        a.toc-link.active { 
+            background: #d63384; 
+            color: white; 
+            font-weight: 600;
+        }
 
         /* Main Content */
         #main { flex-grow: 1; overflow-y: auto; position: relative; scroll-behavior: smooth; }
@@ -36,9 +62,104 @@
         .nav-btn:hover { background: #3498db; color: white; }
         .nav-btn.disabled { opacity: 0.5; pointer-events: none; border-color: #ccc; color: #ccc; }
 
+        /* TOC Toggle Button */
+        .toc-toggle-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            width: 44px;
+            height: 44px;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        .toc-toggle-btn:hover {
+            background: #f8f9fa;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        /* When sidebar is shown, move button to top-right of sidebar */
+        body:not(.sidebar-hidden) .toc-toggle-btn {
+            left: 260px;
+        }
+        
+        /* Hamburger Icon */
+        .hamburger {
+            width: 20px;
+            height: 16px;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .hamburger span {
+            display: block;
+            width: 100%;
+            height: 2px;
+            background: #495057;
+            border-radius: 2px;
+            transition: all 0.3s ease;
+        }
+        
+        /* Animate hamburger to X when sidebar is SHOWN (default state) */
+        body:not(.sidebar-hidden) .hamburger span:nth-child(1) {
+            transform: translateY(7px) rotate(45deg);
+        }
+        body:not(.sidebar-hidden) .hamburger span:nth-child(2) {
+            opacity: 0;
+        }
+        body:not(.sidebar-hidden) .hamburger span:nth-child(3) {
+            transform: translateY(-7px) rotate(-45deg);
+        }
+        
+        /* Sidebar hidden state */
+        .sidebar-hidden #sidebar {
+            transform: translateX(-100%);
+            width: 0;
+            padding: 0;
+            border-right: none;
+        }
+        
+        /* Tooltip */
+        .toc-toggle-btn::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 60px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #212529;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-family: -apple-system, sans-serif;
+            font-size: 0.85em;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+        .toc-toggle-btn:hover::after {
+            opacity: 1;
+        }
+
     </style>
 </head>
 <body>
+    <!-- TOC Toggle Button -->
+    <button class="toc-toggle-btn" onclick="toggleSidebar()" data-tooltip="Toggle Table of Contents">
+        <div class="hamburger">
+            <span></span>
+            <span></span>
+            <span></span>
+        </div>
+    </button>
 
     <!-- SIDEBAR -->
     <div id="sidebar">
@@ -146,6 +267,24 @@
             }
             console.log("Could not find index for", target);
         }
+
+        // Sidebar toggle logic with persistence
+        function toggleSidebar() {
+            const isHidden = document.body.classList.toggle('sidebar-hidden');
+            try { 
+                localStorage.setItem('sidebarHidden', isHidden ? '1' : '0'); 
+            } catch (e) {}
+        }
+
+        // Initialize state from localStorage
+        (function initSidebarState() {
+            try {
+                const hidden = localStorage.getItem('sidebarHidden') === '1';
+                if (hidden) {
+                    document.body.classList.add('sidebar-hidden');
+                }
+            } catch (e) {}
+        })();
     </script>
 </body>
 </html>
