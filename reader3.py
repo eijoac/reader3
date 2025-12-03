@@ -439,6 +439,18 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
                 elif filename in image_map:
                     img['src'] = image_map[filename]
 
+            # Fix Internal Links - rewrite to use a placeholder that will be replaced later
+            # We'll use a special format: __INTERNAL_LINK__filename#anchor
+            for link in soup.find_all('a'):
+                href = link.get('href', '')
+                if not href or href.startswith(('http://', 'https://', 'mailto:', 'javascript:', '#')):
+                    # External links, email, javascript, or same-page anchors - leave as is
+                    continue
+                # This is likely an internal epub link
+                # Store it in a special format for later processing
+                href_decoded = unquote(href)
+                link['href'] = f"__INTERNAL_LINK__{href_decoded}"
+
             # Clean HTML
             soup = clean_html_content(soup)
             soups[name] = soup
@@ -451,6 +463,19 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
         if entry.anchor:
             anchors_by_file[file_href].append(entry.anchor)
 
+    # Build a mapping from href to spine index for link rewriting
+    href_to_index: Dict[str, int] = {}
+    
+    # Also collect all anchors from all files for comprehensive mapping
+    all_file_anchors: Dict[str, List[str]] = {}
+    for file_name, soup in soups.items():
+        anchors = []
+        for tag in soup.find_all(id=True):
+            anchors.append(tag['id'])
+        for tag in soup.find_all(attrs={"name": True}):
+            anchors.append(tag['name'])
+        all_file_anchors[file_name] = anchors
+    
     # Generate chapters sequentially by TOC order
     for idx, entry in enumerate(flat_toc):
         file_href = entry.file_href
@@ -491,6 +516,111 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
             order=len(spine_chapters)
         )
         spine_chapters.append(chapter)
+        
+        current_index = len(spine_chapters) - 1
+        
+        # Map both full href and file-only href to this index
+        href_to_index[ch_href] = current_index
+        href_to_index[file_href] = current_index
+        # Also map just the basename
+        href_to_index[os.path.basename(file_href)] = current_index
+        if entry.anchor:
+            # Map the full path with anchor
+            href_to_index[f"{file_href}#{entry.anchor}"] = current_index
+            # Map the basename with anchor
+            href_to_index[os.path.basename(file_href) + '#' + entry.anchor] = current_index
+        
+        # Map TOC anchors in this file to their exact chapter indices
+        # Later we will assign non-TOC anchors to the nearest preceding chapter.
+    
+    # Assign non-TOC anchors to nearest preceding chapter in the same file
+    for file_name, soup in soups.items():
+        # Collect chapter starts (by anchor) for this file and resolve their DOM positions
+        chapter_starts: List[Tuple[Optional[str], int]] = []  # (anchor, index)
+        for i, ch in enumerate(spine_chapters):
+            if ch.href.split('#')[0] == file_name:
+                ch_anchor = ch.href.split('#')[1] if '#' in ch.href else None
+                chapter_starts.append((ch_anchor, i))
+
+        def tag_position(soup: BeautifulSoup, tag: Optional[Tag]) -> int:
+            if tag is None:
+                return 0
+            # Walk the document to get a stable order metric
+            pos = 1
+            body = soup.find('body') or soup
+            for el in body.descendants:
+                if el is tag:
+                    return pos
+                pos += 1
+            return pos
+
+        # Resolve tags and sort starts by DOM order
+        start_tags: List[Tuple[Optional[str], int, Optional[Tag], int]] = []  # (anchor, idx, tag, pos)
+        for anchor_id, idx in chapter_starts:
+            if anchor_id is None:
+                start_tags.append((None, idx, None, 0))
+            else:
+                tag = _find_anchor_tag(soup, anchor_id)
+                start_tags.append((anchor_id, idx, tag, tag_position(soup, tag)))
+        start_tags.sort(key=lambda t: t[3])
+
+        # For each discovered anchor in file, assign chapter index by containment:
+        # 1) If exact match to a start anchor, choose that chapter.
+        # 2) Else choose the nearest PREVIOUS start (largest s_pos <= a_pos),
+        #    which means the anchor lies within that chapter's slice.
+        for anchor_id in all_file_anchors.get(file_name, []):
+            a_tag = _find_anchor_tag(soup, anchor_id)
+            if not a_tag:
+                continue
+            chosen_idx = None
+            a_pos = tag_position(soup, a_tag)
+            # Exact match first
+            for s_anchor, idx, s_tag, s_pos in start_tags:
+                if s_tag is not None and s_anchor == anchor_id:
+                    chosen_idx = idx
+                    break
+            if chosen_idx is None:
+                # Consider nearest next and previous; prefer next if very close (illustrations at chapter start)
+                next_candidates = [(s_pos, idx) for _, idx, _, s_pos in start_tags if s_pos >= a_pos]
+                prev_candidates = [(s_pos, idx) for _, idx, _, s_pos in start_tags if s_pos <= a_pos]
+                threshold_forward = 20  # DOM steps considered "at start"
+                if next_candidates:
+                    next_pos, next_idx = min(next_candidates, key=lambda t: t[0])
+                else:
+                    next_pos, next_idx = (None, None)
+                if prev_candidates:
+                    prev_pos, prev_idx = max(prev_candidates, key=lambda t: t[0])
+                else:
+                    prev_pos, prev_idx = (None, None)
+                if next_pos is not None and (prev_pos is None or (next_pos - a_pos) <= threshold_forward):
+                    chosen_idx = next_idx
+                elif prev_idx is not None:
+                    chosen_idx = prev_idx
+            if chosen_idx is not None:
+                href_to_index[f"{file_name}#{anchor_id}"] = chosen_idx
+                href_to_index[os.path.basename(file_name) + '#' + anchor_id] = chosen_idx
+
+    # Now rewrite all internal links in the chapters to use indices
+    print("Rewriting internal links...")
+    for chapter in spine_chapters:
+        # Replace __INTERNAL_LINK__ markers with actual indices
+        content = chapter.content
+        
+        for old_href, chapter_idx in href_to_index.items():
+            # Try various formats and preserve fragment if present
+            marker = f'__INTERNAL_LINK__{old_href}'
+            if marker in content:
+                if '#' in old_href:
+                    frag = '#' + old_href.split('#', 1)[1]
+                else:
+                    frag = ''
+                content = content.replace(f'href=\"{marker}\"', f'href=\"__CHAPTER__{chapter_idx}{frag}\"')
+                content = content.replace(f"href='{marker}'", f"href='__CHAPTER__{chapter_idx}{frag}'")
+        
+        # Also handle any remaining __INTERNAL_LINK__ that didn't match
+        # Just strip the marker and leave as relative (better than breaking)
+        content = content.replace('__INTERNAL_LINK__', '')
+        chapter.content = content
 
     # 8. Final Assembly
     final_book = Book(
