@@ -298,11 +298,30 @@ def _find_anchor_tag(soup: BeautifulSoup, anchor: str):
     return soup.find(attrs={"name": anchor})
 
 
-def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], stop_anchors: List[str]) -> str:
+def _fallback_title(soup: BeautifulSoup, file_href: str) -> str:
+    """Best-effort title for a document that has no TOC entry: first heading, else filename."""
+    heading = soup.find(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+    if heading:
+        text = ' '.join(heading.get_text(separator=' ').split())
+        if text:
+            return text
+    stem = os.path.splitext(os.path.basename(file_href))[0]
+    return stem.replace('_', ' ').strip().title() or file_href
+
+
+def _has_content(fragment_html: str) -> bool:
+    """True if the fragment has visible text or an image (so it is worth a chapter of its own)."""
+    frag = BeautifulSoup(fragment_html, 'html.parser')
+    return bool(extract_plain_text(frag)) or frag.find(['img', 'svg', 'image']) is not None
+
+
+def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], stop_anchors: List[str],
+                           allow_empty: bool = False) -> str:
     """
     Returns an HTML fragment starting at `start_anchor` (or top of body when None)
     and ending right before the next occurrence of any of `stop_anchors`.
     Best-effort: works well when chapters start at headers or elements with id.
+    With `allow_empty`, an empty slice is returned as "" instead of the whole body.
     """
     body = soup.find('body')
     if not body:
@@ -390,7 +409,7 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], sto
 
     # Fallback: if nothing collected, return full body contents
     if not html_parts:
-        return "".join(str(x) for x in body.contents)
+        return "" if allow_empty else "".join(str(x) for x in body.contents)
     return "".join(html_parts)
 
 
@@ -488,13 +507,21 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
             soup = clean_html_content(soup)
             soups[name] = soup
 
-    # Build per-file anchor lists in TOC order
-    anchors_by_file: Dict[str, List[str]] = {}
+    # Reading order comes from the spine; the TOC only supplies titles and split points.
+    spine_files: List[str] = []
+    for spine_entry in book.spine:
+        idref = spine_entry[0] if isinstance(spine_entry, (tuple, list)) else spine_entry
+        spine_item = book.get_item_with_id(idref)
+        if spine_item is not None and spine_item.get_name() in soups and spine_item.get_name() not in spine_files:
+            spine_files.append(spine_item.get_name())
+    # Documents the spine doesn't list (but the TOC or manifest does) go last so nothing is dropped
+    for name in [e.file_href for e in flat_toc] + list(soups):
+        if name in soups and name not in spine_files:
+            spine_files.append(name)
+
+    toc_entries_by_file: Dict[str, List[TOCEntry]] = {}
     for entry in flat_toc:
-        file_href = entry.file_href
-        anchors_by_file.setdefault(file_href, [])
-        if entry.anchor:
-            anchors_by_file[file_href].append(entry.anchor)
+        toc_entries_by_file.setdefault(entry.file_href, []).append(entry)
 
     # Build a mapping from href to spine index for link rewriting
     href_to_index: Dict[str, int] = {}
@@ -509,63 +536,70 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
             anchors.append(tag['name'])
         all_file_anchors[file_name] = anchors
     
-    # Generate chapters sequentially by TOC order
-    for idx, entry in enumerate(flat_toc):
-        file_href = entry.file_href
-        anchor = entry.anchor or None
+    # Generate chapters in spine order; within a file, split at TOC anchors in document order
+    for file_href in spine_files:
+        soup = soups[file_href]
+        position_of = {id(el): i for i, el in enumerate(soup.descendants)}
 
-        soup = soups.get(file_href)
-        if not soup:
-            # Missing file; skip
-            continue
+        def anchor_position(anchor: Optional[str]) -> int:
+            if anchor is None:
+                return -1
+            return position_of.get(id(_find_anchor_tag(soup, anchor)), -1)
 
-        # Next anchors in the same file after this one
-        anchors_in_file = anchors_by_file.get(file_href, [])
-        # Compute the list of stop anchors: anchors that come after this anchor
-        stop_anchors: List[str] = []
-        if anchor:
-            try:
-                pos = anchors_in_file.index(anchor)
-                stop_anchors = anchors_in_file[pos + 1:]
-            except ValueError:
-                stop_anchors = anchors_in_file
-        else:
-            # If starting from top of file, any anchor in file can be a stop
-            stop_anchors = anchors_in_file
+        # (anchor, title) pairs; anchors missing from the file are treated as the file start
+        starts: List[Tuple[Optional[str], str]] = []
+        seen_anchors = set()
+        for entry in toc_entries_by_file.get(file_href, []):
+            anchor = entry.anchor if entry.anchor and _find_anchor_tag(soup, entry.anchor) else None
+            if anchor in seen_anchors:
+                continue
+            seen_anchors.add(anchor)
+            starts.append((anchor, entry.title))
+        starts.sort(key=lambda s: anchor_position(s[0]))
 
-        fragment_html = _slice_html_by_anchors(soup, anchor, stop_anchors)
+        toc_anchors = [a for a, _ in starts if a]
+        synthetic_start = False
+        if not starts:
+            starts = [(None, "")]
+            synthetic_start = True
+        elif None not in seen_anchors:
+            # Content before the first TOC anchor still belongs to the book
+            leading_html = _slice_html_by_anchors(soup, None, toc_anchors, allow_empty=True)
+            if _has_content(leading_html):
+                starts.insert(0, (None, ""))
+                synthetic_start = True
 
-        # Extract plain text from the fragment
-        frag_soup = BeautifulSoup(fragment_html, 'html.parser')
-        text = extract_plain_text(frag_soup)
+        for anchor, title in starts:
+            stop_anchors = [a for a in toc_anchors if a != anchor]
+            fragment_html = _slice_html_by_anchors(soup, anchor, stop_anchors, allow_empty=anchor is None and bool(toc_anchors))
+            # Only skip chapters we invented ourselves; TOC-listed ones must stay linkable
+            if synthetic_start and anchor is None and not _has_content(fragment_html):
+                continue
 
-        ch_href = file_href if not entry.anchor else f"{file_href}#{entry.anchor}"
-        chapter = ChapterContent(
-            id=f"{file_href}#{entry.anchor}" if entry.anchor else file_href,
-            href=ch_href,
-            title=entry.title or os.path.splitext(os.path.basename(file_href))[0],
-            content=fragment_html,
-            text=text,
-            order=len(spine_chapters)
-        )
-        spine_chapters.append(chapter)
-        
-        current_index = len(spine_chapters) - 1
-        
-        # Map both full href and file-only href to this index
-        href_to_index[ch_href] = current_index
-        href_to_index[file_href] = current_index
-        # Also map just the basename
-        href_to_index[os.path.basename(file_href)] = current_index
-        if entry.anchor:
-            # Map the full path with anchor
-            href_to_index[f"{file_href}#{entry.anchor}"] = current_index
-            # Map the basename with anchor
-            href_to_index[os.path.basename(file_href) + '#' + entry.anchor] = current_index
-        
-        # Map TOC anchors in this file to their exact chapter indices
-        # Later we will assign non-TOC anchors to the nearest preceding chapter.
-    
+            # Extract plain text from the fragment
+            frag_soup = BeautifulSoup(fragment_html, 'html.parser')
+            text = extract_plain_text(frag_soup)
+
+            ch_href = f"{file_href}#{anchor}" if anchor else file_href
+            chapter = ChapterContent(
+                id=ch_href,
+                href=ch_href,
+                title=title or _fallback_title(frag_soup, file_href),
+                content=fragment_html,
+                text=text,
+                order=len(spine_chapters)
+            )
+            spine_chapters.append(chapter)
+
+            current_index = len(spine_chapters) - 1
+
+            href_to_index[ch_href] = current_index
+            # Links to a bare file go to its first chapter
+            href_to_index.setdefault(file_href, current_index)
+            href_to_index.setdefault(os.path.basename(file_href), current_index)
+            if anchor:
+                href_to_index[os.path.basename(file_href) + '#' + anchor] = current_index
+
     # Assign non-TOC anchors to nearest preceding chapter in the same file
     for file_name, soup in soups.items():
         # Collect chapter starts (by anchor) for this file and resolve their DOM positions
