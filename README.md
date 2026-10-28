@@ -14,7 +14,7 @@ The project uses [uv](https://docs.astral.sh/uv/). So for example, download [Dra
 uv run reader3.py dracula.epub
 ```
 
-This creates the directory `dracula_data`, which registers the book to your local library. We can then run the server:
+This creates `library/dracula_data`, which registers the book in the server's library. We can then run the server:
 
 ```bash
 uv run server.py

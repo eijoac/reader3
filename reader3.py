@@ -653,7 +653,8 @@ if __name__ == "__main__":
 
     epub_file = sys.argv[1]
     assert os.path.exists(epub_file), "File not found."
-    out_dir = os.path.splitext(epub_file)[0] + "_data"
+    book_name = os.path.splitext(os.path.basename(epub_file))[0]
+    out_dir = os.path.join("library", f"{book_name}_data")
 
     book_obj = process_epub(epub_file, out_dir)
     save_to_pickle(book_obj, out_dir)
