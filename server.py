@@ -5,7 +5,6 @@ from typing import Optional
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from reader3 import Book, BookMetadata, ChapterContent, TOCEntry
@@ -16,23 +15,30 @@ templates = Jinja2Templates(directory="templates")
 # Where are the book folders located?
 BOOKS_DIR = "library"
 
-@lru_cache(maxsize=10)
-def load_book_cached(folder_name: str) -> Optional[Book]:
-    """
-    Loads the book from the pickle file.
-    Cached so we don't re-read the disk on every click.
-    """
+@lru_cache(maxsize=64)
+def _load_book(folder_name: str, mtime_ns: int) -> Optional[Book]:
+    # mtime_ns is unused in the body; it is part of the cache key so a reprocessed book is reloaded
     file_path = os.path.join(BOOKS_DIR, folder_name, "book.pkl")
-    if not os.path.exists(file_path):
-        return None
-
     try:
         with open(file_path, "rb") as f:
-            book = pickle.load(f)
-        return book
+            return pickle.load(f)
     except Exception as e:
         print(f"Error loading book {folder_name}: {e}")
         return None
+
+
+def load_book_cached(folder_name: str) -> Optional[Book]:
+    """
+    Loads the book from the pickle file.
+    Cached so we don't re-read the disk on every click, but the cache is
+    invalidated whenever book.pkl changes (e.g. the book is reprocessed).
+    """
+    file_path = os.path.join(BOOKS_DIR, folder_name, "book.pkl")
+    try:
+        mtime_ns = os.stat(file_path).st_mtime_ns
+    except OSError:
+        return None
+    return _load_book(folder_name, mtime_ns)
 
 @app.get("/", response_class=HTMLResponse)
 async def library_view(request: Request):
@@ -166,24 +172,6 @@ async def serve_cover(book_id: str):
         raise HTTPException(status_code=404, detail="Cover image file not found")
     
     return FileResponse(cover_path)
-
-@app.get("/read/{book_id}/images/{image_name}")
-async def serve_image(book_id: str, image_name: str):
-    """
-    Serves images specifically for a book.
-    The HTML contains <img src="images/pic.jpg">.
-    The browser resolves this to /read/{book_id}/images/pic.jpg.
-    """
-    # Security check: ensure book_id is clean
-    safe_book_id = os.path.basename(book_id)
-    safe_image_name = os.path.basename(image_name)
-
-    img_path = os.path.join(BOOKS_DIR, safe_book_id, "images", safe_image_name)
-
-    if not os.path.exists(img_path):
-        raise HTTPException(status_code=404, detail="Image not found")
-
-    return FileResponse(img_path)
 
 if __name__ == "__main__":
     import uvicorn
