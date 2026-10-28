@@ -288,9 +288,59 @@ def _flatten_toc(entries: List[TOCEntry]) -> List[TOCEntry]:
     return flat
 
 
-def _find_anchor_tag(soup: BeautifulSoup, anchor: str):
+class _AnchorIndex:
+    """
+    One-pass lookup tables for a parsed document, so anchor and document-order
+    queries don't rescan the whole DOM every time.
+    """
+
+    def __init__(self, soup: BeautifulSoup):
+        self.soup = soup
+        self._by_id: Dict[str, Tag] = {}
+        self._all_by_id: Dict[str, List[Tag]] = {}
+        self._by_name: Dict[str, Tag] = {}
+        for tag in soup.find_all(True):
+            tag_id = tag.get('id')
+            if tag_id:
+                self._all_by_id.setdefault(tag_id, []).append(tag)
+                self._by_id.setdefault(tag_id, tag)
+            tag_name = tag.get('name')
+            if tag_name and tag_name not in self._by_name:
+                self._by_name[tag_name] = tag
+        self._positions: Optional[Dict[int, int]] = None
+        self._body_positions: Optional[Dict[int, int]] = None
+
+    def all_with_id(self, anchor: str) -> List[Tag]:
+        return self._all_by_id.get(anchor, [])
+
+    def find(self, anchor: Optional[str]) -> Optional[Tag]:
+        """First element with id=anchor, else the first with name=anchor."""
+        if not anchor:
+            return None
+        return self._by_id.get(anchor) or self._by_name.get(anchor)
+
+    def position(self, tag: Optional[Tag]) -> int:
+        """Document-order index of `tag`, or -1 if it is not in the document."""
+        if self._positions is None:
+            self._positions = {id(el): i for i, el in enumerate(self.soup.descendants)}
+        return self._positions.get(id(tag), -1) if tag is not None else -1
+
+    def body_position(self, tag: Optional[Tag]) -> int:
+        """1-based position of `tag` among the body's descendants (past the end if absent)."""
+        if tag is None:
+            return 0
+        if self._body_positions is None:
+            body = self.soup.find('body') or self.soup
+            self._body_positions = {id(el): i for i, el in enumerate(body.descendants, start=1)}
+            self._body_positions[-1] = len(self._body_positions) + 1
+        return self._body_positions.get(id(tag), self._body_positions[-1])
+
+
+def _find_anchor_tag(soup: BeautifulSoup, anchor: str, index: Optional[_AnchorIndex] = None):
     if not anchor:
         return None
+    if index is not None:
+        return index.find(anchor)
     tag = soup.find(id=anchor)
     if tag:
         return tag
@@ -316,7 +366,7 @@ def _has_content(fragment_html: str) -> bool:
 
 
 def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], stop_anchors: List[str],
-                           allow_empty: bool = False) -> str:
+                           allow_empty: bool = False, index: Optional[_AnchorIndex] = None) -> str:
     """
     Returns an HTML fragment starting at `start_anchor` (or top of body when None)
     and ending right before the next occurrence of any of `stop_anchors`.
@@ -326,12 +376,14 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], sto
     body = soup.find('body')
     if not body:
         return str(soup)
+    if index is None:
+        index = _AnchorIndex(soup)
 
     # If no start anchor: start at beginning of body
     if not start_anchor:
         start_node = None
     else:
-        start_tag = _find_anchor_tag(soup, start_anchor)
+        start_tag = index.find(start_anchor)
         if not start_tag:
             # Anchor not found; return entire body as fallback
             return "".join(str(x) for x in body.contents)
@@ -344,19 +396,16 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], sto
     # Determine the next stop tag (first that appears after start)
     stop_tag_candidates = []
     for a in stop_anchors:
-        t = _find_anchor_tag(soup, a)
+        t = index.find(a)
         if t:
             stop_tag_candidates.append(t)
 
-    # Helper to compare document order using next_elements
+    # True when b_tag appears strictly after a_tag in document order
     def comes_before(a_tag, b_tag) -> bool:
         if a_tag is None or b_tag is None:
             return False
-        it = a_tag.next_elements
-        for el in it:
-            if el == b_tag:
-                return True
-        return False
+        pos_a, pos_b = index.position(a_tag), index.position(b_tag)
+        return pos_a >= 0 and pos_b > pos_a
 
     # Pick the earliest stop tag that comes after start
     stop_tag: Optional[Any] = None
@@ -373,6 +422,24 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], sto
                 if stop_tag is None or comes_before(cand, stop_tag):
                     stop_tag = cand
 
+    # Top-level body children that contain (as a descendant, not themselves) any of `tags`
+    def containing_children(tags: List[Tag]) -> set:
+        result = set()
+        for t in tags:
+            node = t.parent
+            while node is not None and node is not body:
+                if node.parent is body:
+                    result.add(id(node))
+                    break
+                node = node.parent
+        return result
+
+    start_containers = containing_children(index.all_with_id(start_anchor)) if start_node is not None else set()
+    stop_containers: set = set()
+    if stop_tag is not None:
+        stop_id = stop_tag.get('id')
+        stop_containers = containing_children([stop_tag] + (index.all_with_id(stop_id) if stop_id else []))
+
     # Collect HTML between start and stop
     html_parts: List[str] = []
     collecting = False if start_node is not None else True
@@ -381,26 +448,14 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], sto
         # We operate at the top level of body to avoid deep nested slicing issues
         if not collecting and start_node is not None:
             # Start when we reach start_node or it is contained within this child
-            if child == start_node or (isinstance(child, Tag) and child.find(id=start_anchor) is not None):
+            if child == start_node or id(child) in start_containers:
                 collecting = True
 
         if collecting:
             # Stop before stop_tag if it's this child or contained
             if stop_tag is not None:
-                if child == stop_tag:
+                if child == stop_tag or id(child) in stop_containers:
                     break
-                if isinstance(child, Tag):
-                    # If the stop tag is inside this child, stop here
-                    stop_id = stop_tag.get('id') if hasattr(stop_tag, 'get') else None
-                    if stop_id and child.find(id=stop_id) is not None:
-                        break
-                    # As a fallback, check descendants identity
-                    try:
-                        for d in child.descendants:
-                            if d is stop_tag:
-                                raise StopIteration
-                    except StopIteration:
-                        break
             html_parts.append(str(child))
 
         # If starting at beginning, start collecting immediately
@@ -528,6 +583,7 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
     
     # Also collect all anchors from all files for comprehensive mapping
     all_file_anchors: Dict[str, List[str]] = {}
+    anchor_indexes: Dict[str, _AnchorIndex] = {}
     for file_name, soup in soups.items():
         anchors = []
         for tag in soup.find_all(id=True):
@@ -535,22 +591,23 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
         for tag in soup.find_all(attrs={"name": True}):
             anchors.append(tag['name'])
         all_file_anchors[file_name] = anchors
+        anchor_indexes[file_name] = _AnchorIndex(soup)
     
     # Generate chapters in spine order; within a file, split at TOC anchors in document order
     for file_href in spine_files:
         soup = soups[file_href]
-        position_of = {id(el): i for i, el in enumerate(soup.descendants)}
+        index = anchor_indexes[file_href]
 
         def anchor_position(anchor: Optional[str]) -> int:
             if anchor is None:
                 return -1
-            return position_of.get(id(_find_anchor_tag(soup, anchor)), -1)
+            return index.position(index.find(anchor))
 
         # (anchor, title) pairs; anchors missing from the file are treated as the file start
         starts: List[Tuple[Optional[str], str]] = []
         seen_anchors = set()
         for entry in toc_entries_by_file.get(file_href, []):
-            anchor = entry.anchor if entry.anchor and _find_anchor_tag(soup, entry.anchor) else None
+            anchor = entry.anchor if entry.anchor and index.find(entry.anchor) else None
             if anchor in seen_anchors:
                 continue
             seen_anchors.add(anchor)
@@ -564,14 +621,14 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
             synthetic_start = True
         elif None not in seen_anchors:
             # Content before the first TOC anchor still belongs to the book
-            leading_html = _slice_html_by_anchors(soup, None, toc_anchors, allow_empty=True)
+            leading_html = _slice_html_by_anchors(soup, None, toc_anchors, allow_empty=True, index=index)
             if _has_content(leading_html):
                 starts.insert(0, (None, ""))
                 synthetic_start = True
 
         for anchor, title in starts:
             stop_anchors = [a for a in toc_anchors if a != anchor]
-            fragment_html = _slice_html_by_anchors(soup, anchor, stop_anchors, allow_empty=anchor is None and bool(toc_anchors))
+            fragment_html = _slice_html_by_anchors(soup, anchor, stop_anchors, allow_empty=anchor is None and bool(toc_anchors), index=index)
             # Only skip chapters we invented ourselves; TOC-listed ones must stay linkable
             if synthetic_start and anchor is None and not _has_content(fragment_html):
                 continue
@@ -601,25 +658,15 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
                 href_to_index[os.path.basename(file_href) + '#' + anchor] = current_index
 
     # Assign non-TOC anchors to nearest preceding chapter in the same file
-    for file_name, soup in soups.items():
-        # Collect chapter starts (by anchor) for this file and resolve their DOM positions
-        chapter_starts: List[Tuple[Optional[str], int]] = []  # (anchor, index)
-        for i, ch in enumerate(spine_chapters):
-            if ch.href.split('#')[0] == file_name:
-                ch_anchor = ch.href.split('#')[1] if '#' in ch.href else None
-                chapter_starts.append((ch_anchor, i))
+    chapters_by_file: Dict[str, List[Tuple[Optional[str], int]]] = {}
+    for i, ch in enumerate(spine_chapters):
+        ch_file, _, ch_anchor = ch.href.partition('#')
+        chapters_by_file.setdefault(ch_file, []).append((ch_anchor or None, i))
 
-        def tag_position(soup: BeautifulSoup, tag: Optional[Tag]) -> int:
-            if tag is None:
-                return 0
-            # Walk the document to get a stable order metric
-            pos = 1
-            body = soup.find('body') or soup
-            for el in body.descendants:
-                if el is tag:
-                    return pos
-                pos += 1
-            return pos
+    for file_name, soup in soups.items():
+        index = anchor_indexes[file_name]
+        # Collect chapter starts (by anchor) for this file and resolve their DOM positions
+        chapter_starts = chapters_by_file.get(file_name, [])  # (anchor, index)
 
         # Resolve tags and sort starts by DOM order
         start_tags: List[Tuple[Optional[str], int, Optional[Tag], int]] = []  # (anchor, idx, tag, pos)
@@ -627,8 +674,8 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
             if anchor_id is None:
                 start_tags.append((None, idx, None, 0))
             else:
-                tag = _find_anchor_tag(soup, anchor_id)
-                start_tags.append((anchor_id, idx, tag, tag_position(soup, tag)))
+                tag = index.find(anchor_id)
+                start_tags.append((anchor_id, idx, tag, index.body_position(tag)))
         start_tags.sort(key=lambda t: t[3])
 
         # For each discovered anchor in file, assign chapter index by containment:
@@ -636,11 +683,11 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
         # 2) Else choose the nearest PREVIOUS start (largest s_pos <= a_pos),
         #    which means the anchor lies within that chapter's slice.
         for anchor_id in all_file_anchors.get(file_name, []):
-            a_tag = _find_anchor_tag(soup, anchor_id)
+            a_tag = index.find(anchor_id)
             if not a_tag:
                 continue
             chosen_idx = None
-            a_pos = tag_position(soup, a_tag)
+            a_pos = index.body_position(a_tag)
             # Exact match first
             for s_anchor, idx, s_tag, s_pos in start_tags:
                 if s_tag is not None and s_anchor == anchor_id:
@@ -669,21 +716,21 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
 
     # Now rewrite all internal links in the chapters to use indices
     print("Rewriting internal links...")
+    link_pattern = re.compile(r'href=(["\'])__INTERNAL_LINK__(.*?)\1', re.DOTALL)
+
+    def rewrite_link(m: re.Match) -> str:
+        quote, old_href = m.group(1), m.group(2)
+        chapter_idx = href_to_index.get(old_href)
+        if chapter_idx is None:
+            return m.group(0)
+        # Preserve the fragment if present
+        frag = '#' + old_href.split('#', 1)[1] if '#' in old_href else ''
+        return f'href={quote}__CHAPTER__{chapter_idx}{frag}{quote}'
+
     for chapter in spine_chapters:
-        # Replace __INTERNAL_LINK__ markers with actual indices
-        content = chapter.content
-        
-        for old_href, chapter_idx in href_to_index.items():
-            # Try various formats and preserve fragment if present
-            marker = f'__INTERNAL_LINK__{old_href}'
-            if marker in content:
-                if '#' in old_href:
-                    frag = '#' + old_href.split('#', 1)[1]
-                else:
-                    frag = ''
-                content = content.replace(f'href=\"{marker}\"', f'href=\"__CHAPTER__{chapter_idx}{frag}\"')
-                content = content.replace(f"href='{marker}'", f"href='__CHAPTER__{chapter_idx}{frag}'")
-        
+        # Replace __INTERNAL_LINK__ markers with actual indices (single pass over the content)
+        content = link_pattern.sub(rewrite_link, chapter.content)
+
         # Also handle any remaining __INTERNAL_LINK__ that didn't match
         # Just strip the marker and leave as relative (better than breaking)
         content = content.replace('__INTERNAL_LINK__', '')
