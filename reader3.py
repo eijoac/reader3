@@ -403,9 +403,7 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
     # 2. Extract Metadata
     metadata = extract_metadata_robust(book)
 
-    # 3. Prepare Output Directories
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
+    # 3. Prepare Output Directories (output_dir is expected to be a fresh staging dir)
     images_dir = os.path.join(output_dir, 'images')
     os.makedirs(images_dir, exist_ok=True)
 
@@ -677,6 +675,44 @@ def save_to_pickle(book: Book, output_dir: str):
     print(f"Saved structured data to {p_path}")
 
 
+def convert_epub(epub_path: str, output_dir: str) -> Book:
+    """
+    Converts an EPUB into `output_dir`, replacing any previous conversion only
+    after the new one has been fully built and saved. On failure, the existing
+    output (if any) is left untouched.
+    """
+    parent = os.path.dirname(os.path.abspath(output_dir))
+    os.makedirs(parent, exist_ok=True)
+
+    # Hidden names that don't end in "_data", so the server never lists them as books
+    base = os.path.basename(os.path.normpath(output_dir))
+    staging_dir = os.path.join(parent, f".{base}.staging")
+    backup_dir = os.path.join(parent, f".{base}.backup")
+    for stale in (staging_dir, backup_dir):
+        shutil.rmtree(stale, ignore_errors=True)
+
+    try:
+        book = process_epub(epub_path, staging_dir)
+        save_to_pickle(book, staging_dir)
+    except BaseException:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+
+    had_previous = os.path.exists(output_dir)
+    try:
+        if had_previous:
+            os.rename(output_dir, backup_dir)
+        os.rename(staging_dir, output_dir)
+    except BaseException:
+        if had_previous and os.path.exists(backup_dir) and not os.path.exists(output_dir):
+            os.rename(backup_dir, output_dir)
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+
+    shutil.rmtree(backup_dir, ignore_errors=True)
+    return book
+
+
 # --- CLI ---
 
 if __name__ == "__main__":
@@ -691,8 +727,7 @@ if __name__ == "__main__":
     book_name = os.path.splitext(os.path.basename(epub_file))[0]
     out_dir = os.path.join("library", f"{book_name}_data")
 
-    book_obj = process_epub(epub_file, out_dir)
-    save_to_pickle(book_obj, out_dir)
+    book_obj = convert_epub(epub_file, out_dir)
     print("\n--- Summary ---")
     print(f"Title: {book_obj.metadata.title}")
     print(f"Authors: {', '.join(book_obj.metadata.authors)}")
