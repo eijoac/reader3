@@ -199,7 +199,7 @@
 
                        BETTER FIX: Use JavaScript to match filenames.
                     -->
-                    <a href="#" onclick="findAndGo('{{ item.href }}')"
+                    <a href="#" data-href="{{ item.href }}"
                        class="toc-link {% if is_active %}active{% endif %}">
                         {{ item.title }}
                     </a>
@@ -243,30 +243,34 @@
     </div>
 
     <script>
-        // Helper to map TOC filenames to Spine Indices
-        // Pass the spine data from python to JS
-        const spineMap = {
-            {% for ch in book.spine %}
-            "{{ ch.href }}": {{ ch.order }},
-            "{{ ch.href.split('#')[0] }}": {{ ch.order }},
-            {% endfor %}
-        };
+        // Untrusted values (hrefs, book id) are passed through tojson, never spliced into JS strings
+        const bookId = {{ book_id | tojson }};
+        const spineHrefs = {{ book.spine | map(attribute='href') | list | tojson }};
+
+        // Map TOC hrefs (with or without anchor) to spine indices; a bare file maps to its first chapter
+        const spineMap = new Map();
+        spineHrefs.forEach((href, idx) => {
+            spineMap.set(href, idx);
+            const file = href.split('#')[0];
+            if (!spineMap.has(file)) spineMap.set(file, idx);
+        });
 
         function findAndGo(target) {
             // Try exact href (with anchor), then fallback to file-only
-            const idxExact = spineMap[target];
-            if (idxExact !== undefined) {
-                window.location.href = "/read/{{ book_id }}/" + idxExact;
-                return;
-            }
-            const cleanFile = target.split('#')[0];
-            const idxFile = spineMap[cleanFile];
-            if (idxFile !== undefined) {
-                window.location.href = "/read/{{ book_id }}/" + idxFile;
+            const idx = spineMap.has(target) ? spineMap.get(target) : spineMap.get(target.split('#')[0]);
+            if (idx !== undefined) {
+                window.location.href = "/read/" + encodeURIComponent(bookId) + "/" + idx;
                 return;
             }
             console.log("Could not find index for", target);
         }
+
+        document.querySelectorAll('a.toc-link').forEach(link => {
+            link.addEventListener('click', event => {
+                event.preventDefault();
+                findAndGo(link.dataset.href);
+            });
+        });
 
         // Sidebar toggle logic with persistence
         function toggleSidebar() {

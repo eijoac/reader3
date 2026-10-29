@@ -83,15 +83,20 @@ URL_ATTRS = ('href', 'src', 'xlink:href', 'action', 'formaction', 'poster', 'dat
 SAFE_URL_SCHEMES = ('http', 'https', 'mailto')
 
 
-def _is_safe_url(value: str, attr: str, tag_name: str) -> bool:
+def _url_scheme(value: str) -> Optional[str]:
+    """Lowercased URL scheme as a browser would see it, or None for relative URLs and fragments."""
     # Browsers ignore whitespace/control characters inside the scheme (e.g. "java\tscript:")
     compact = ''.join(ch for ch in value if ch.isprintable() and not ch.isspace()).lower()
     scheme_match = re.match(r'^([a-z][a-z0-9+.\-]*):', compact)
-    if not scheme_match:
-        return True  # relative URL or fragment
-    if scheme_match.group(1) in SAFE_URL_SCHEMES:
+    return scheme_match.group(1) if scheme_match else None
+
+
+def _is_safe_url(value: str, attr: str, tag_name: str) -> bool:
+    scheme = _url_scheme(value)
+    if scheme is None or scheme in SAFE_URL_SCHEMES:
         return True
     # Inline raster/vector images are inert when loaded through <img>
+    compact = ''.join(ch for ch in value if ch.isprintable() and not ch.isspace()).lower()
     return tag_name == 'img' and attr == 'src' and compact.startswith('data:image/')
 
 
@@ -534,6 +539,9 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
             raw_content = item.get_content().decode('utf-8', errors='ignore')
             soup = BeautifulSoup(raw_content, 'html.parser')
 
+            # Sanitize first: the link rewrite below must only ever see already-vetted markup
+            soup = clean_html_content(soup)
+
             # Fix Images
             for img in soup.find_all('img'):
                 src = img.get('src', '')
@@ -550,16 +558,18 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
             # We'll use a special format: __INTERNAL_LINK__filename#anchor
             for link in soup.find_all('a'):
                 href = link.get('href', '')
-                if not href or href.startswith(('http://', 'https://', 'mailto:', 'javascript:', '#')):
-                    # External links, email, javascript, or same-page anchors - leave as is
+                if not href or href.lstrip().startswith('#') or _url_scheme(href) is not None:
+                    # External links (already vetted by the sanitizer), email, or same-page anchors
                     continue
                 # This is likely an internal epub link
                 # Store it in a special format for later processing
                 href_decoded = unquote(href)
+                # Percent-decoding can reveal a scheme the sanitizer couldn't see (e.g. "java%73cript:")
+                if _url_scheme(href_decoded) is not None:
+                    del link['href']
+                    continue
                 link['href'] = f"__INTERNAL_LINK__{href_decoded}"
 
-            # Clean HTML
-            soup = clean_html_content(soup)
             soups[name] = soup
 
     # Reading order comes from the spine; the TOC only supplies titles and split points.
