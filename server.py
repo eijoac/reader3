@@ -21,6 +21,28 @@ log = logging.getLogger("uvicorn.error")  # shares uvicorn's handlers, so messag
 BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI()
+# Book HTML is untrusted. Even if the sanitizer missed something, the browser must not run it:
+# scripts only from our own /static, no plugins, no framing, no remote images or requests.
+# Inline styles stay allowed because books carry style attributes.
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; "
+        "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -110,7 +132,7 @@ def _toc_index_map(book: Book) -> Dict[str, int]:
     return result
 
 @app.get("/", response_class=HTMLResponse)
-async def library_view(request: Request):
+def library_view(request: Request):
     """Lists all available processed books."""
     books = []
 
@@ -139,7 +161,7 @@ async def library_view(request: Request):
     return templates.TemplateResponse(request, "library.html", {"books": books})
 
 @app.get("/read/{book_id}/images/{image_name}")
-async def serve_image(book_id: str, image_name: str):
+def serve_image(book_id: str, image_name: str):
     """
     Serves images specifically for a book.
     The HTML contains <img src="images/pic.jpg">.
@@ -154,7 +176,7 @@ async def serve_image(book_id: str, image_name: str):
     return FileResponse(img_path)
 
 @app.get("/read/{book_id}")
-async def redirect_to_first_chapter(book_id: str):
+def redirect_to_first_chapter(book_id: str):
     """Canonical URL for a book is its first chapter."""
     _book_dir(book_id)
     return RedirectResponse(f"/read/{quote(book_id, safe='')}/0")
@@ -179,7 +201,7 @@ def _resolve_chapter(book: Book, ref: str) -> Optional[int]:
 
 
 @app.get("/read/{book_id}/{chapter_ref:path}", response_class=HTMLResponse)
-async def read_chapter(request: Request, book_id: str, chapter_ref: str):
+def read_chapter(request: Request, book_id: str, chapter_ref: str):
     """The main reader interface. Accepts either integer index or filename."""
     book = load_book_cached(book_id)
     if not book:
@@ -217,7 +239,7 @@ async def read_chapter(request: Request, book_id: str, chapter_ref: str):
     })
 
 @app.get("/cover/{book_id}")
-async def serve_cover(book_id: str):
+def serve_cover(book_id: str):
     """
     Serves the cover image for a book in the library view.
     """

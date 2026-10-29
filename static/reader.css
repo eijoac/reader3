@@ -186,3 +186,5 @@ body:not(.sidebar-hidden) .hamburger span:nth-child(3) {
 .toc-toggle-btn:hover::after {
     opacity: 1;
 }
+
+.section-count { color: var(--faint); padding: 10px; }

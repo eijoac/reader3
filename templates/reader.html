@@ -9,7 +9,7 @@
 </head>
 <body>
     <!-- TOC Toggle Button -->
-    <button class="toc-toggle-btn" onclick="toggleSidebar()" data-tooltip="Toggle Table of Contents">
+    <button class="toc-toggle-btn" id="toc-toggle" data-tooltip="Toggle Table of Contents">
         <div class="hamburger">
             <span></span>
             <span></span>
@@ -74,7 +74,7 @@
                     <span class="nav-btn disabled">← Previous</span>
                 {% endif %}
 
-                <span style="color: var(--faint); padding: 10px;">
+                <span class="section-count">
                     Section {{ chapter_index + 1 }} of {{ book.spine|length }}
                 </span>
 
@@ -87,13 +87,13 @@
         </div>
     </div>
 
-    <script>
-        window.READER_CONFIG = {{ {
+    <script type="application/json" id="reader-config">
+        {{ {
             "bookId": book_id,
             "chapter": chapter_index,
             "prevUrl": ('/read/' ~ book_url ~ '/' ~ prev_idx) if prev_idx is not none else none,
             "nextUrl": ('/read/' ~ book_url ~ '/' ~ next_idx) if next_idx is not none else none,
-        } | tojson }};
+        } | tojson }}
     </script>
     <script src="/static/reader.js"></script>
 </body>

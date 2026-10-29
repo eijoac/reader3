@@ -1,5 +1,15 @@
 document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
 
+// A cover that fails to load is replaced by the placeholder next to it
+document.querySelectorAll('img.book-cover').forEach((img) => {
+    const showPlaceholder = () => {
+        img.hidden = true;
+        img.nextElementSibling.classList.remove('hidden');
+    };
+    img.addEventListener('error', showPlaceholder);
+    if (img.complete && img.naturalWidth === 0) showPlaceholder();  // failed before this script ran
+});
+
 // Resume where the reader left off (position is saved by the reader page)
 document.querySelectorAll('a.read-btn').forEach((btn) => {
     try {

@@ -9,6 +9,7 @@ function toggleSidebar() {
         localStorage.setItem('sidebarHidden', isHidden ? '1' : '0'); 
     } catch (e) {}
 }
+document.getElementById('toc-toggle').addEventListener('click', toggleSidebar);
 
 // Initialize state from localStorage
 (function initSidebarState() {
@@ -63,8 +64,9 @@ document.getElementById('font-toggle').addEventListener('click', toggleFont);
 updateFontControls();
 
 // Reading position: remember the last chapter and how far down it the reader was
-// READER_CONFIG is set by an inline script in reader.html
-const { bookId: BOOK_ID, chapter: CHAPTER, prevUrl: PREV_URL, nextUrl: NEXT_URL } = window.READER_CONFIG;
+// Per-page data comes from a JSON block in reader.html (not executed, so a strict CSP allows it)
+const { bookId: BOOK_ID, chapter: CHAPTER, prevUrl: PREV_URL, nextUrl: NEXT_URL } =
+    JSON.parse(document.getElementById('reader-config').textContent);
 const POS_KEY = 'reader3:pos:' + BOOK_ID;
 const main = document.getElementById('main');
 

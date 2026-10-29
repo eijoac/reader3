@@ -131,23 +131,47 @@ def test_roundtrip_through_json_is_lossless(converted):
 
 
 def _reader_config(html: str) -> dict:
-    m = re.search(r"window\.READER_CONFIG = (\{.*?\});", html, re.S)
-    return json.loads(m.group(1).replace("\\u0026", "&").replace("\\u0027", "'").replace("\\u003c", "<").replace("\\u003e", ">"))
+    m = re.search(r'<script type="application/json" id="reader-config">(.*?)</script>', html, re.S)
+    return json.loads(m.group(1))
 
 
 def test_static_assets_are_served(client):
-    for path, marker in [("theme.js", "toggleTheme"), ("reader.js", "READER_CONFIG"),
+    for path, marker in [("theme.js", "toggleTheme"), ("reader.js", "reader-config"),
                          ("reader.css", "--font-scale"), ("library.js", "read-btn"), ("library.css", "book-grid")]:
         r = client.get(f"/static/{path}")
         assert r.status_code == 200 and marker in r.text, path
     assert client.get("/static/../server.py").status_code == 404
 
 
-def test_pages_have_no_inline_styles_or_big_scripts(client):
-    for url in ("/", "/read/Test_data/0"):
-        html = client.get(url).text
-        assert "<style" not in html
-        assert "/static/theme.js" in html
+@pytest.mark.parametrize("url", ["/", "/read/Test_data/0"])
+def test_pages_work_under_the_csp(client, url):
+    # The CSP only allows scripts from /static: no executable inline scripts, no inline handlers
+    html = client.get(url).text
+    assert "<style" not in html
+    for m in re.finditer(r"<script\b([^>]*)>", html):
+        attrs = m.group(1)
+        assert "src=" in attrs or "application/json" in attrs, m.group(0)
+    assert not re.search(r"\son[a-z]+\s*=", html)
+    assert "javascript:" not in html
+
+
+@pytest.mark.parametrize("url", ["/", "/read/Test_data/0", "/cover/Test_data", "/static/theme.js", "/nope"])
+def test_security_headers_on_every_response(client, url):
+    r = client.get(url)
+    csp = r.headers["content-security-policy"]
+    assert "script-src 'self'" in csp and "object-src 'none'" in csp and "frame-ancestors 'none'" in csp
+    assert "'unsafe-inline'" not in csp.split("style-src")[0]  # never for scripts
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["referrer-policy"] == "no-referrer"
+
+
+def test_routes_are_threadpool_functions():
+    # async routes would run blocking file/JSON work on the event loop
+    import inspect
+    for route in server.app.routes:
+        endpoint = getattr(route, "endpoint", None)
+        if endpoint and getattr(route, "path", "").startswith(("/read", "/cover")) or getattr(route, "path", "") == "/":
+            assert not inspect.iscoroutinefunction(endpoint), route.path
 
 
 def test_reader_has_theme_keyboard_and_position_hooks(client):
