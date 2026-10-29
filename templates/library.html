@@ -70,6 +70,12 @@
                 <div class="book-cover-placeholder">📖</div>
                 {% endif %}
                 <div class="book-title">{{ book.title }}</div>
+                {% if book.outdated %}
+                <div class="book-meta">
+                    Converted by an older version.<br>
+                    Run <code>uv run reader3.py reprocess {{ book.title }}</code>
+                </div>
+                {% else %}
                 <div class="book-meta">
                     {{ book.author }}<br>
                     {{ book.chapters }} sections
@@ -78,6 +84,7 @@
                     <a href="/read/{{ book.id | urlencode }}/0" class="btn read-btn"
                        data-book-id="{{ book.id }}" data-chapters="{{ book.chapters }}">Read Book</a>
                 </div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>

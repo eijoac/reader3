@@ -1,4 +1,4 @@
-import pickle
+import json
 import sys
 from pathlib import Path
 
@@ -120,6 +120,5 @@ def client(library):
     return TestClient(server.app)
 
 
-def load_pickle(folder: Path):
-    with open(folder / "book.pkl", "rb") as f:
-        return pickle.load(f)
+def load_json(folder: Path) -> dict:
+    return json.loads((folder / "book.json").read_text(encoding="utf-8"))

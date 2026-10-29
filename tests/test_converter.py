@@ -6,7 +6,7 @@ import pytest
 from ebooklib import epub
 
 import reader3
-from conftest import build_epub, load_pickle
+from conftest import build_epub, load_json
 
 
 def test_spine_order_and_toc_splits(converted):
@@ -89,14 +89,14 @@ def test_metadata(converted):
 def test_failed_conversion_keeps_previous_output(tmp_path, epub_path):
     out = tmp_path / "Book_data"
     reader3.convert_epub(str(epub_path), str(out))
-    before = (out / "book.pkl").read_bytes()
+    before = (out / "book.json").read_bytes()
 
     broken = tmp_path / "broken.epub"
     broken.write_text("not a zip")
     with pytest.raises(Exception):
         reader3.convert_epub(str(broken), str(out))
 
-    assert (out / "book.pkl").read_bytes() == before
+    assert (out / "book.json").read_bytes() == before
     assert sorted(p.name for p in tmp_path.iterdir()) == ["Book_data", "broken.epub"]  # no staging/backup left
 
 
@@ -106,7 +106,7 @@ def test_reconversion_replaces_output(tmp_path, epub_path):
     (out / "stale.txt").write_text("old")
     reader3.convert_epub(str(epub_path), str(out))
     assert not (out / "stale.txt").exists()
-    assert load_pickle(out).metadata.title == "Test Book"
+    assert load_json(out)["metadata"]["title"] == "Test Book"
 
 
 def test_fallback_toc_follows_spine_order(tmp_path):
@@ -158,7 +158,7 @@ def test_cli_reprocess_without_epub_keeps_data(lib, capsys):
     (lib / "Book.epub").unlink()
     assert reader3.main(["reader3.py", "reprocess", "Book"], library_dir=str(lib)) == 1
     assert "not found" in capsys.readouterr().err
-    assert (lib / "Book_data" / "book.pkl").exists()
+    assert (lib / "Book_data" / "book.json").exists()
 
 
 def test_cli_remove(lib):
@@ -172,3 +172,22 @@ def test_cli_remove(lib):
 def test_cli_remove_rejects_unsafe_names(lib, name):
     assert reader3.main(["reader3.py", "remove", name], library_dir=str(lib)) == 1
     assert (lib / "Book_data").exists()
+
+
+def test_cli_list_and_reprocess_legacy_book(lib, capsys):
+    (lib / "Book_data" / "book.json").unlink()
+    (lib / "Book_data" / "meta.json").unlink()
+    (lib / "Book_data" / "book.pkl").write_bytes(b"old")
+    capsys.readouterr()
+    assert reader3.main(["reader3.py", "list"], library_dir=str(lib)) == 0
+    assert "run reprocess" in capsys.readouterr().out
+    assert reader3.main(["reader3.py", "reprocess", "--all"], library_dir=str(lib)) == 0
+    assert not (lib / "Book_data" / "book.pkl").exists()
+    assert reader3.read_summary(str(lib / "Book_data"))["title"] == "Test Book"
+
+
+def test_meta_summary(converted):
+    _, out = converted
+    meta = reader3.read_summary(str(out))
+    assert meta["title"] == "Test Book" and meta["authors"] == ["Test Author"]
+    assert meta["chapters"] > 0

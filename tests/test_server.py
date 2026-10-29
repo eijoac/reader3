@@ -1,7 +1,6 @@
 import os
-import pickle
+import json
 import re
-import sys
 
 import pytest
 
@@ -62,7 +61,7 @@ def test_images_and_cover_served(client, converted):
     r = client.get(f"/read/Test_data/images/{image}")
     assert r.status_code == 200 and r.content.startswith(b"\x89PNG")
     assert client.get("/read/Test_data/images/missing.png").status_code == 404
-    assert client.get("/read/Test_data/images/..%2Fbook.pkl").status_code == 404
+    assert client.get("/read/Test_data/images/..%2Fbook.json").status_code == 404
 
 
 @pytest.mark.parametrize("path", [
@@ -75,7 +74,8 @@ def test_invalid_book_ids_are_404(client, path):
 
 def test_folder_without_data_suffix_is_not_served(client, library):
     (library / "plain").mkdir()
-    (library / "plain" / "book.pkl").write_bytes((library / "Test_data" / "book.pkl").read_bytes())
+    for name in ("book.json", "meta.json"):
+        (library / "plain" / name).write_bytes((library / "Test_data" / name).read_bytes())
     assert client.get("/read/plain/0").status_code == 404
     assert client.get("/cover/plain").status_code == 404
 
@@ -89,26 +89,45 @@ def test_is_valid_book_id():
 
 def test_corrupt_book_is_skipped(client, library):
     (library / "Bad_data").mkdir()
-    (library / "Bad_data" / "book.pkl").write_text("garbage")
+    (library / "Bad_data" / "book.json").write_text("garbage")
+    (library / "Bad_data" / "meta.json").write_text("garbage")
     r = client.get("/")
     assert r.status_code == 200 and "Test Book" in r.text
     assert client.get("/read/Bad_data/0").status_code == 404
 
 
-def test_pickle_written_as_main_module_still_loads(library, monkeypatch):
-    # `python reader3.py` pickles classes as __main__.X; the server must resolve them from reader3
-    classes = [reader3.Book, reader3.BookMetadata, reader3.ChapterContent, reader3.TOCEntry]
-    book = pickle.loads((library / "Test_data" / "book.pkl").read_bytes())
-    main = sys.modules["__main__"]
-    for cls in classes:
-        monkeypatch.setattr(cls, "__module__", "__main__")
-        monkeypatch.setattr(main, cls.__name__, cls, raising=False)
-    data = pickle.dumps(book)
-    assert b"__main__" in data
+def test_legacy_pickle_book_is_flagged_not_loaded(client, library):
+    (library / "Old_data").mkdir()
+    (library / "Old_data" / "book.pkl").write_bytes(b"\x80\x04N.")
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "reprocess Old" in page.text and "Test Book" in page.text
+    r = client.get("/read/Old_data/0")
+    assert r.status_code == 409 and "reprocess Old" in r.text
 
-    (library / "Main_data").mkdir()
-    (library / "Main_data" / "book.pkl").write_bytes(data)
-    assert server.load_book_cached("Main_data").metadata.title == "Test Book"
+
+def test_other_format_version_is_not_loaded(client, library):
+    for name in ("book.json", "meta.json"):
+        path = library / "Test_data" / name
+        data = json.loads(path.read_text())
+        data["format_version"] = 999
+        path.write_text(json.dumps(data))
+    assert client.get("/read/Test_data/0").status_code == 404
+    assert "Test Book" not in client.get("/").text
+
+
+def test_library_page_does_not_load_books(client, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("library page must only read meta.json")
+    monkeypatch.setattr(server, "load_book_file", boom)
+    r = client.get("/")
+    assert "Test Book" in r.text
+    assert client.get("/cover/Test_data").status_code == 200
+
+
+def test_roundtrip_through_json_is_lossless(converted):
+    book, out = converted
+    assert reader3.load_book_file(str(out)) == book
 
 
 def test_reader_has_theme_keyboard_and_position_hooks(client):
@@ -127,10 +146,10 @@ def test_reader_has_font_controls_and_book_language(client):
 
 
 def test_reader_language_comes_from_the_book_and_is_escaped(client, library):
-    pkl = library / "Test_data" / "book.pkl"
-    book = pickle.loads(pkl.read_bytes())
-    book.metadata.language = 'fr"><script>x</script>'
-    pkl.write_bytes(pickle.dumps(book))
+    path = library / "Test_data" / "book.json"
+    data = json.loads(path.read_text())
+    data["metadata"]["language"] = 'fr"><script>x</script>'
+    path.write_text(json.dumps(data))
     html = client.get("/read/Test_data/0").text
     assert "<script>x</script>" not in html
 
@@ -150,10 +169,10 @@ def test_cache_reloads_when_book_is_reprocessed(library):
     first = server.load_book_cached("Test_data")
     assert server.load_book_cached("Test_data") is first
 
-    pkl = library / "Test_data" / "book.pkl"
-    book = pickle.loads(pkl.read_bytes())
-    book.metadata.title = "Changed Title"
-    pkl.write_bytes(pickle.dumps(book))
-    st = pkl.stat()
-    os.utime(pkl, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
+    path = library / "Test_data" / "book.json"
+    data = json.loads(path.read_text())
+    data["metadata"]["title"] = "Changed Title"
+    path.write_text(json.dumps(data))
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
     assert server.load_book_cached("Test_data").metadata.title == "Changed Title"

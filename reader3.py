@@ -4,12 +4,12 @@ Parses an EPUB file into a structured object that can be used to serve the book 
 
 import logging
 import os
-import pickle
+import json
 import posixpath
 import re
 import shutil
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 from urllib.parse import unquote
@@ -63,7 +63,7 @@ class BookMetadata:
 
 @dataclass
 class Book:
-    """The Master Object to be pickled."""
+    """The master object, stored as book.json."""
     metadata: BookMetadata
     spine: List[ChapterContent]  # The actual content (linear files)
     toc: List[TOCEntry]          # The navigation tree
@@ -72,7 +72,69 @@ class Book:
     # Meta info
     source_file: str
     processed_at: str
-    version: str = "3.0"
+
+
+# --- Storage (book.json + meta.json) ---
+
+# Bump when the stored layout changes; books with another version must be reprocessed.
+FORMAT_VERSION = 4
+BOOK_FILE = "book.json"
+META_FILE = "meta.json"  # small summary, so the library page never has to load whole books
+LEGACY_BOOK_FILE = "book.pkl"
+
+
+def _toc_from_dict(d: dict) -> TOCEntry:
+    return TOCEntry(**{**d, "children": [_toc_from_dict(c) for c in d.get("children", [])]})
+
+
+def book_to_dict(book: Book) -> dict:
+    return {"format_version": FORMAT_VERSION, **asdict(book)}
+
+
+def book_from_dict(d: dict) -> Book:
+    if d.get("format_version") != FORMAT_VERSION:
+        raise ValueError(f"unsupported book format version: {d.get('format_version')!r}")
+    return Book(
+        metadata=BookMetadata(**d["metadata"]),
+        spine=[ChapterContent(**c) for c in d["spine"]],
+        toc=[_toc_from_dict(t) for t in d["toc"]],
+        images=dict(d["images"]),
+        source_file=d["source_file"],
+        processed_at=d["processed_at"],
+    )
+
+
+def book_summary(book: Book) -> dict:
+    return {
+        "format_version": FORMAT_VERSION,
+        "title": book.metadata.title,
+        "authors": list(book.metadata.authors),
+        "chapters": len(book.spine),
+        "cover_image": book.metadata.cover_image,
+    }
+
+
+def load_book_file(book_dir: str) -> Book:
+    with open(os.path.join(book_dir, BOOK_FILE), "r", encoding="utf-8") as f:
+        return book_from_dict(json.load(f))
+
+
+def read_summary(book_dir: str) -> Optional[dict]:
+    """The summary from meta.json, or None if it is missing, unreadable or from another format version."""
+    try:
+        with open(os.path.join(book_dir, META_FILE), "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        if meta.get("format_version") == FORMAT_VERSION and isinstance(meta.get("title"), str):
+            return meta
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def is_legacy_book(book_dir: str) -> bool:
+    """True for folders written by older versions (book.pkl only), which need reprocessing."""
+    return (os.path.isfile(os.path.join(book_dir, LEGACY_BOOK_FILE))
+            and not os.path.isfile(os.path.join(book_dir, BOOK_FILE)))
 
 
 # --- Utilities ---
@@ -743,11 +805,11 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
     return final_book
 
 
-def save_to_pickle(book: Book, output_dir: str):
-    p_path = os.path.join(output_dir, 'book.pkl')
-    with open(p_path, 'wb') as f:
-        pickle.dump(book, f)
-    log.info("Saved structured data to %s", p_path)
+def save_book(book: Book, output_dir: str):
+    for name, data in ((BOOK_FILE, book_to_dict(book)), (META_FILE, book_summary(book))):
+        with open(os.path.join(output_dir, name), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    log.info("Saved structured data to %s", os.path.join(output_dir, BOOK_FILE))
 
 
 def convert_epub(epub_path: str, output_dir: str) -> Book:
@@ -768,7 +830,7 @@ def convert_epub(epub_path: str, output_dir: str) -> Book:
 
     try:
         book = process_epub(epub_path, staging_dir)
-        save_to_pickle(book, staging_dir)
+        save_book(book, staging_dir)
     except BaseException:
         shutil.rmtree(staging_dir, ignore_errors=True)
         raise
@@ -803,7 +865,8 @@ def _book_names(library_dir: str) -> List[str]:
         return []
     return sorted(
         d[:-len("_data")] for d in os.listdir(library_dir)
-        if d.endswith("_data") and os.path.isfile(os.path.join(library_dir, d, "book.pkl"))
+        if d.endswith("_data") and (
+            os.path.isfile(os.path.join(library_dir, d, BOOK_FILE)) or is_legacy_book(os.path.join(library_dir, d)))
     )
 
 
@@ -839,12 +902,12 @@ def _cmd_list(library_dir: str) -> int:
         return 0
     for name in names:
         source = "epub" if os.path.isfile(os.path.join(library_dir, f"{name}.epub")) else "no epub"
-        try:
-            with open(os.path.join(library_dir, f"{name}_data", "book.pkl"), "rb") as f:
-                meta = pickle.load(f).metadata
-            title, authors = meta.title, ", ".join(meta.authors)
-        except Exception:
-            title, authors = "(unreadable - reprocess it)", ""
+        data_dir = os.path.join(library_dir, f"{name}_data")
+        meta = read_summary(data_dir)
+        if meta:
+            title, authors = meta["title"], ", ".join(meta["authors"])
+        else:
+            title, authors = "(old or unreadable format - run reprocess)", ""
         print(f"{name}  [{source}]  {title}" + (f" - {authors}" if authors else ""))
     return 0
 
@@ -880,7 +943,7 @@ def _cmd_remove(args: List[str], library_dir: str) -> int:
         print(f"Error: invalid book name: {name!r}", file=sys.stderr)
         return 1
     data_dir = os.path.join(library_dir, f"{name}_data")
-    if not os.path.isfile(os.path.join(data_dir, "book.pkl")):
+    if not (os.path.isfile(os.path.join(data_dir, BOOK_FILE)) or is_legacy_book(data_dir)):
         print(f"Error: no converted book named {name!r}", file=sys.stderr)
         return 1
     shutil.rmtree(data_dir)
