@@ -500,7 +500,7 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
     print("Extracting other images...")
 
     for item in book.get_items():
-        if item.get_type() == ebooklib.ITEM_IMAGE:
+        if item.get_type() in (ebooklib.ITEM_IMAGE, ebooklib.ITEM_COVER):
             # Normalize filename
             original_fname = os.path.basename(item.get_name())
             # Sanitize filename for OS
@@ -543,16 +543,19 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
             soup = clean_html_content(soup)
 
             # Fix Images
-            for img in soup.find_all('img'):
-                src = img.get('src', '')
-                if not src:
-                    continue
-                src_decoded = unquote(src)
-                filename = os.path.basename(src_decoded)
-                if src_decoded in image_map:
-                    img['src'] = image_map[src_decoded]
-                elif filename in image_map:
-                    img['src'] = image_map[filename]
+            # <img src> plus SVG <image xlink:href|href> (used by cover-page wrappers)
+            for img in soup.find_all(['img', 'image']):
+                attrs = ('src',) if img.name == 'img' else ('xlink:href', 'href')
+                for attr in attrs:
+                    src = img.get(attr, '')
+                    if not src:
+                        continue
+                    src_decoded = unquote(src)
+                    filename = os.path.basename(src_decoded)
+                    if src_decoded in image_map:
+                        img[attr] = image_map[src_decoded]
+                    elif filename in image_map:
+                        img[attr] = image_map[filename]
 
             # Fix Internal Links - rewrite to use a placeholder that will be replaced later
             # We'll use a special format: __INTERNAL_LINK__filename#anchor

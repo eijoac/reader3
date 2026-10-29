@@ -170,39 +170,18 @@
         {% macro render_toc(items) %}
             <ul class="toc-list">
             {% for item in items %}
+                {# toc_index maps each TOC href to the spine index it opens (computed in server.py) #}
+                {% set target = toc_index.get(item.href) %}
                 <li class="toc-item">
-                    <!--
-                        Matching Logic:
-                        If the TOC item filename matches the current chapter filename, mark active.
-                        Ideally we match spine indices, but Reader 3 TOC maps to filenames.
-                        We use a simple hash matching logic here.
-                    -->
-                    {% set is_active = current_chapter.href == item.href %}
-
-                    <!--
-                       We need to find which linear chapter index (0, 1, 2) corresponds
-                       to this TOC entry file.
-                       Since that's hard to calculate in Jinja, we just link to the
-                       file anchor. BUT, to make our linear navigation work, we
-                       rely on the fact that the user is currently reading 'chapter_index'.
-
-                       Ideally, clicking a TOC link should find the 'index' of that file.
-                       For simplicity in this version: We link to the 'href' (filename)
-                       and let JavaScript or Backend handle it?
-
-                       Actually, let's just link to the file. The browser interprets #anchors.
-                       However, our router uses /read/book/INDEX.
-
-                       SIMPLE FIX: We won't link the TOC to the route index in this simple version
-                       unless we build a map. We will visually show structure,
-                       but rely on "Previous/Next" for linear reading.
-
-                       BETTER FIX: Use JavaScript to match filenames.
-                    -->
-                    <a href="#" data-href="{{ item.href }}"
-                       class="toc-link {% if is_active %}active{% endif %}">
+                    {% if target is not none %}
+                    <a href="/read/{{ book_url }}/{{ target }}"
+                       class="toc-link {% if target == chapter_index %}active{% endif %}"
+                       {% if target == chapter_index %}aria-current="page"{% endif %}>
                         {{ item.title }}
                     </a>
+                    {% else %}
+                    <span class="toc-link">{{ item.title }}</span>
+                    {% endif %}
 
                     {% if item.children %}
                         {{ render_toc(item.children) }}
@@ -224,7 +203,7 @@
 
             <div class="chapter-nav">
                 {% if prev_idx is not none %}
-                    <a href="/read/{{ book_id }}/{{ prev_idx }}" class="nav-btn">← Previous</a>
+                    <a href="/read/{{ book_url }}/{{ prev_idx }}" class="nav-btn">← Previous</a>
                 {% else %}
                     <span class="nav-btn disabled">← Previous</span>
                 {% endif %}
@@ -234,7 +213,7 @@
                 </span>
 
                 {% if next_idx is not none %}
-                    <a href="/read/{{ book_id }}/{{ next_idx }}" class="nav-btn">Next →</a>
+                    <a href="/read/{{ book_url }}/{{ next_idx }}" class="nav-btn">Next →</a>
                 {% else %}
                     <span class="nav-btn disabled">Next →</span>
                 {% endif %}
@@ -243,34 +222,9 @@
     </div>
 
     <script>
-        // Untrusted values (hrefs, book id) are passed through tojson, never spliced into JS strings
-        const bookId = {{ book_id | tojson }};
-        const spineHrefs = {{ book.spine | map(attribute='href') | list | tojson }};
-
-        // Map TOC hrefs (with or without anchor) to spine indices; a bare file maps to its first chapter
-        const spineMap = new Map();
-        spineHrefs.forEach((href, idx) => {
-            spineMap.set(href, idx);
-            const file = href.split('#')[0];
-            if (!spineMap.has(file)) spineMap.set(file, idx);
-        });
-
-        function findAndGo(target) {
-            // Try exact href (with anchor), then fallback to file-only
-            const idx = spineMap.has(target) ? spineMap.get(target) : spineMap.get(target.split('#')[0]);
-            if (idx !== undefined) {
-                window.location.href = "/read/" + encodeURIComponent(bookId) + "/" + idx;
-                return;
-            }
-            console.log("Could not find index for", target);
-        }
-
-        document.querySelectorAll('a.toc-link').forEach(link => {
-            link.addEventListener('click', event => {
-                event.preventDefault();
-                findAndGo(link.dataset.href);
-            });
-        });
+        // Keep the current chapter's TOC entry in view
+        const activeLink = document.querySelector('a.toc-link.active');
+        if (activeLink) activeLink.scrollIntoView({ block: 'center' });
 
         // Sidebar toggle logic with persistence
         function toggleSidebar() {

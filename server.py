@@ -1,13 +1,15 @@
 import os
 import pickle
+import re
 from functools import lru_cache
-from typing import Optional
+from typing import Dict, List, Optional
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 
-from reader3 import Book, BookMetadata, ChapterContent, TOCEntry
+from reader3 import Book, TOCEntry
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -15,13 +17,43 @@ templates = Jinja2Templates(directory="templates")
 # Where are the book folders located?
 BOOKS_DIR = "library"
 
+
+def _is_valid_book_id(book_id: str) -> bool:
+    """A book id is the name of a processed folder: a plain `*_data` name, never a path."""
+    return (
+        book_id.endswith("_data")
+        and book_id == os.path.basename(book_id)
+        and "\\" not in book_id
+        and "\x00" not in book_id
+    )
+
+
+def _book_dir(book_id: str) -> str:
+    """Resolves a book id to its folder, or raises 404. Every route goes through this."""
+    if not _is_valid_book_id(book_id):
+        raise HTTPException(status_code=404, detail="Book not found")
+    path = os.path.join(BOOKS_DIR, book_id)
+    if not os.path.isdir(path):
+        raise HTTPException(status_code=404, detail="Book not found")
+    return path
+
+
+class _BookUnpickler(pickle.Unpickler):
+    """Books pickled by `python reader3.py` reference `__main__.<Class>`; resolve them from reader3."""
+
+    def find_class(self, module, name):
+        if module == "__main__":
+            module = "reader3"
+        return super().find_class(module, name)
+
+
 @lru_cache(maxsize=64)
 def _load_book(folder_name: str, mtime_ns: int) -> Optional[Book]:
     # mtime_ns is unused in the body; it is part of the cache key so a reprocessed book is reloaded
     file_path = os.path.join(BOOKS_DIR, folder_name, "book.pkl")
     try:
         with open(file_path, "rb") as f:
-            return pickle.load(f)
+            return _BookUnpickler(f).load()
     except Exception as e:
         print(f"Error loading book {folder_name}: {e}")
         return None
@@ -33,12 +65,38 @@ def load_book_cached(folder_name: str) -> Optional[Book]:
     Cached so we don't re-read the disk on every click, but the cache is
     invalidated whenever book.pkl changes (e.g. the book is reprocessed).
     """
+    if not _is_valid_book_id(folder_name):
+        return None
     file_path = os.path.join(BOOKS_DIR, folder_name, "book.pkl")
     try:
         mtime_ns = os.stat(file_path).st_mtime_ns
     except OSError:
         return None
     return _load_book(folder_name, mtime_ns)
+
+
+def _toc_index_map(book: Book) -> Dict[str, int]:
+    """
+    Maps every TOC href to the index of the chapter it opens: the exact chapter
+    (file#anchor) if there is one, otherwise the first chapter of that file.
+    """
+    exact: Dict[str, int] = {}
+    first_in_file: Dict[str, int] = {}
+    for idx, chapter in enumerate(book.spine):
+        exact.setdefault(chapter.href, idx)
+        first_in_file.setdefault(chapter.href.split('#')[0], idx)
+
+    result: Dict[str, int] = {}
+
+    def walk(entries: List[TOCEntry]):
+        for entry in entries:
+            idx = exact.get(entry.href, first_in_file.get(entry.file_href))
+            if idx is not None:
+                result[entry.href] = idx
+            walk(entry.children)
+
+    walk(book.toc)
+    return result
 
 @app.get("/", response_class=HTMLResponse)
 async def library_view(request: Request):
@@ -70,13 +128,10 @@ async def serve_image(book_id: str, image_name: str):
     The HTML contains <img src="images/pic.jpg">.
     The browser resolves this to /read/{book_id}/images/pic.jpg.
     """
-    # Security check: ensure book_id is clean
-    safe_book_id = os.path.basename(book_id)
-    safe_image_name = os.path.basename(image_name)
+    # Security check: the id must be a plain book folder name
+    img_path = os.path.join(_book_dir(book_id), "images", os.path.basename(image_name))
 
-    img_path = os.path.join(BOOKS_DIR, safe_book_id, "images", safe_image_name)
-
-    if not os.path.exists(img_path):
+    if not os.path.isfile(img_path):
         raise HTTPException(status_code=404, detail="Image not found")
 
     return FileResponse(img_path)
@@ -119,12 +174,12 @@ async def read_chapter(request: Request, book_id: str, chapter_ref: str):
     
     # Replace __CHAPTER__ markers in content with actual URLs
     content = current_chapter.content
-    import re
+    book_url = quote(book_id, safe='')
     # Replace with optional fragment preserved: __CHAPTER__<idx>#fragment
     def repl(m):
         idx = m.group(1)
         frag = m.group(2) or ''
-        return f'href="/read/{book_id}/{idx}{frag}"'
+        return f'href="/read/{book_url}/{idx}{frag}"'
     content = re.sub(r'href=["\']__CHAPTER__([0-9]+)(#[^"\']*)?["\']', repl, content)
     
     # Create a modified chapter object with rewritten content
@@ -149,6 +204,8 @@ async def read_chapter(request: Request, book_id: str, chapter_ref: str):
         "current_chapter": modified_chapter,
         "chapter_index": chapter_index,
         "book_id": book_id,
+        "book_url": book_url,
+        "toc_index": _toc_index_map(book),
         "prev_idx": prev_idx,
         "next_idx": next_idx
     })
@@ -162,15 +219,12 @@ async def serve_cover(book_id: str):
     if not book or not book.metadata.cover_image:
         raise HTTPException(status_code=404, detail="Cover not found")
     
-    # Security check: ensure book_id is clean
-    safe_book_id = os.path.basename(book_id)
-    cover_filename = os.path.basename(book.metadata.cover_image)
-    
-    cover_path = os.path.join(BOOKS_DIR, safe_book_id, "images", cover_filename)
-    
-    if not os.path.exists(cover_path):
+    # Security check: the id must be a plain book folder name
+    cover_path = os.path.join(_book_dir(book_id), "images", os.path.basename(book.metadata.cover_image))
+
+    if not os.path.isfile(cover_path):
         raise HTTPException(status_code=404, detail="Cover image file not found")
-    
+
     return FileResponse(cover_path)
 
 if __name__ == "__main__":

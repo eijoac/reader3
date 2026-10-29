@@ -32,7 +32,7 @@
             {% for book in books %}
             <div class="book-card">
                 {% if book.has_cover %}
-                <img src="/cover/{{ book.id }}" alt="{{ book.title }} cover" class="book-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                <img src="/cover/{{ book.id | urlencode }}" alt="{{ book.title }} cover" class="book-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                 <div class="book-cover-placeholder" style="display:none;">📖</div>
                 {% else %}
                 <div class="book-cover-placeholder">📖</div>
@@ -43,7 +43,7 @@
                     {{ book.chapters }} sections
                 </div>
                 <div class="btn-container">
-                    <a href="/read/{{ book.id }}/0" class="btn">Read Book</a>
+                    <a href="/read/{{ book.id | urlencode }}/0" class="btn">Read Book</a>
                 </div>
             </div>
             {% endfor %}
