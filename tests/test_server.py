@@ -119,6 +119,22 @@ def test_reader_has_theme_keyboard_and_position_hooks(client):
     assert 'const BOOK_ID = "Test_data"' in html
 
 
+def test_reader_has_font_controls_and_book_language(client):
+    html = client.get("/read/Test_data/2").text
+    for control in ("font-smaller", "font-larger", "font-toggle"):
+        assert f'id="{control}"' in html
+    assert '<html lang="en">' in html
+
+
+def test_reader_language_comes_from_the_book_and_is_escaped(client, library):
+    pkl = library / "Test_data" / "book.pkl"
+    book = pickle.loads(pkl.read_bytes())
+    book.metadata.language = 'fr"><script>x</script>'
+    pkl.write_bytes(pickle.dumps(book))
+    html = client.get("/read/Test_data/0").text
+    assert "<script>x</script>" not in html
+
+
 def test_reader_keyboard_urls_are_null_at_the_ends(client, converted):
     book, _ = converted
     assert "const PREV_URL = null" in client.get("/read/Test_data/0").text

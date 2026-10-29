@@ -1,3 +1,4 @@
+import shutil
 import re
 from pathlib import Path
 
@@ -122,3 +123,52 @@ def test_cli_errors(tmp_path, monkeypatch, capsys):
     assert reader3.main(["reader3.py", "bad.epub"]) == 1
     assert "Error" in capsys.readouterr().err
     assert not Path("library/bad_data").exists()
+
+
+@pytest.fixture
+def lib(tmp_path, epub_path):
+    d = tmp_path / "lib"
+    d.mkdir()
+    shutil.copy(epub_path, d / "Book.epub")
+    assert reader3.main(["reader3.py", str(d / "Book.epub")], library_dir=str(d)) == 0
+    return d
+
+
+def test_cli_list(lib, capsys):
+    capsys.readouterr()
+    assert reader3.main(["reader3.py", "list"], library_dir=str(lib)) == 0
+    out = capsys.readouterr().out
+    assert "Book" in out and "Test Book" in out and "[epub]" in out
+
+
+def test_cli_list_empty(tmp_path, capsys):
+    assert reader3.main(["reader3.py", "list"], library_dir=str(tmp_path / "none")) == 0
+    assert "No books" in capsys.readouterr().out
+
+
+def test_cli_reprocess(lib):
+    stale = lib / "Book_data" / "stale.txt"
+    stale.write_text("old")
+    assert reader3.main(["reader3.py", "reprocess", "Book"], library_dir=str(lib)) == 0
+    assert not stale.exists()
+    assert reader3.main(["reader3.py", "reprocess", "--all"], library_dir=str(lib)) == 0
+
+
+def test_cli_reprocess_without_epub_keeps_data(lib, capsys):
+    (lib / "Book.epub").unlink()
+    assert reader3.main(["reader3.py", "reprocess", "Book"], library_dir=str(lib)) == 1
+    assert "not found" in capsys.readouterr().err
+    assert (lib / "Book_data" / "book.pkl").exists()
+
+
+def test_cli_remove(lib):
+    assert reader3.main(["reader3.py", "remove", "Book"], library_dir=str(lib)) == 0
+    assert not (lib / "Book_data").exists()
+    assert (lib / "Book.epub").exists()
+    assert reader3.main(["reader3.py", "remove", "Book"], library_dir=str(lib)) == 1
+
+
+@pytest.mark.parametrize("name", ["..", "../x", "a/b", ""])
+def test_cli_remove_rejects_unsafe_names(lib, name):
+    assert reader3.main(["reader3.py", "remove", name], library_dir=str(lib)) == 1
+    assert (lib / "Book_data").exists()

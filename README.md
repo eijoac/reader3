@@ -14,6 +14,15 @@ The project uses [uv](https://docs.astral.sh/uv/). So for example, download [Dra
 uv run reader3.py dracula.epub
 ```
 
+Manage the library:
+
+```bash
+uv run reader3.py list                  # converted books
+uv run reader3.py reprocess Dracula     # re-convert from library/Dracula.epub
+uv run reader3.py reprocess --all       # e.g. after upgrading reader3
+uv run reader3.py remove Dracula        # delete library/Dracula_data (keeps the .epub)
+```
+
 This creates `library/dracula_data`, which registers the book in the server's library. We can then run the server:
 
 ```bash
@@ -25,7 +34,8 @@ And visit [localhost:8123](http://localhost:8123/) to see your current Library. 
 ### Reading
 
 - Your place in each book is remembered (in the browser) and the library offers "Continue" for books you've started.
-- Keyboard: `←` / `→` previous / next section, `t` show/hide the contents, `d` toggle dark mode.
+- Keyboard: `←` / `→` previous / next section, `t` show/hide the contents, `d` toggle dark mode, `f` switch serif / sans-serif, `+` / `-` text size.
+- The A / A buttons (top right) change the text size and `Aa` switches the font; both choices are remembered.
 - Dark mode follows your system setting until you pick one with the toggle.
 
 ## Tests
