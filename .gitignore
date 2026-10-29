@@ -12,6 +12,9 @@ wheels/
 # Custom
 *_data/
 *.epub
+# ...except fixtures that tests may add
+!/tests/**/*_data/
+!/tests/**/*.epub
 
 # book library
 /library/

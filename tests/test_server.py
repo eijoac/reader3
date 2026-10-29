@@ -249,3 +249,35 @@ def test_reader_does_not_rebuild_toc_map_per_request(client, monkeypatch):
         raise AssertionError("toc map must come from the cache")
     monkeypatch.setattr(server, "_toc_index_map", boom)
     assert client.get("/read/Test_data/1").status_code == 200
+
+
+def test_reader_omits_lang_when_the_book_has_none(client, library):
+    path = library / "Test_data" / "book.json"
+    data = json.loads(path.read_text())
+    data["metadata"]["language"] = ""
+    path.write_text(json.dumps(data))
+    html = client.get("/read/Test_data/0").text
+    assert "<html>" in html and "lang=" not in html.split("</head>")[0]
+
+
+def test_static_urls_are_versioned_and_cached(client):
+    html = client.get("/read/Test_data/0").text
+    urls = re.findall(r'(?:src|href)="(/static/[^"]+)"', html)
+    assert urls and all(re.search(r"\?v=\d+$", u) for u in urls)
+
+    versioned = client.get(urls[0])
+    assert versioned.status_code == 200
+    assert "immutable" in versioned.headers["cache-control"]
+    assert "max-age=31536000" in versioned.headers["cache-control"]
+    assert client.get("/static/theme.js").headers["cache-control"] == "no-cache"
+    assert "cache-control" not in client.get("/cover/Test_data").headers
+
+
+def test_static_version_changes_with_the_file(tmp_path, monkeypatch):
+    (tmp_path / "static").mkdir()
+    f = tmp_path / "static" / "a.js"
+    f.write_text("1")
+    monkeypatch.setattr(server, "BASE_DIR", tmp_path)
+    first = server.static_url("a.js")
+    os.utime(f, ns=(1, 2_000_000_000))
+    assert server.static_url("a.js") != first

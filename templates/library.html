@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Library</title>
-    <script src="/static/theme.js"></script>
-    <link rel="stylesheet" href="/static/library.css">
+    <script src="{{ static_url('theme.js') }}"></script>
+    <link rel="stylesheet" href="{{ static_url('library.css') }}">
 </head>
 <body>
     <div class="container">
@@ -50,6 +50,6 @@
         </div>
     </div>
 
-    <script src="/static/library.js"></script>
+    <script src="{{ static_url('library.js') }}"></script>
 </body>
 </html>

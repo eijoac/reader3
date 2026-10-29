@@ -2,9 +2,11 @@
 
 
 import ebooklib
+from bs4 import BeautifulSoup
 from ebooklib import epub
 
 from .models import TOCEntry
+from .slicing import _fallback_title
 
 
 def _make_toc_entry(title: str, href: str, children: list[TOCEntry] | None = None) -> TOCEntry:
@@ -31,7 +33,7 @@ def parse_toc_recursive(toc_list) -> list[TOCEntry]:
 
 def get_fallback_toc(book_obj) -> list[TOCEntry]:
     """
-    If TOC is missing, build a flat one from the Spine, in reading order.
+    If TOC is missing, build a flat one from the Spine, in reading order, titled by each file's first heading.
     """
     toc = []
     for spine_entry in book_obj.spine:
@@ -40,8 +42,8 @@ def get_fallback_toc(book_obj) -> list[TOCEntry]:
         if item is None or item.get_type() != ebooklib.ITEM_DOCUMENT:
             continue
         name = item.get_name()
-        title = name.replace('.html', '').replace('.xhtml', '').replace('_', ' ').title()
-        toc.append(_make_toc_entry(title, name))
+        soup = BeautifulSoup(item.get_content().decode('utf-8', errors='ignore'), 'html.parser')
+        toc.append(_make_toc_entry(_fallback_title(soup, name), name))
     return toc
 
 

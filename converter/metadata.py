@@ -18,7 +18,7 @@ def extract_metadata_robust(book_obj) -> BookMetadata:
 
     return BookMetadata(
         title=get_one('title') or "Untitled",
-        language=get_one('language') or "en",
+        language=get_one('language') or "",  # unknown stays empty; pages then omit lang
         authors=get_list('creator'),
         description=get_one('description'),
         publisher=get_one('publisher'),

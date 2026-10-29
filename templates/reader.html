@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="{{ book.metadata.language or 'en' }}">
+<html{% if book.metadata.language %} lang="{{ book.metadata.language }}"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ book.metadata.title }}</title>
-    <script src="/static/theme.js"></script>
-    <link rel="stylesheet" href="/static/reader.css">
+    <script src="{{ static_url('theme.js') }}"></script>
+    <link rel="stylesheet" href="{{ static_url('reader.css') }}">
 </head>
 <body>
     <!-- TOC Toggle Button -->
@@ -95,6 +95,6 @@
             "nextUrl": ('/read/' ~ book_url ~ '/' ~ next_idx) if next_idx is not none else none,
         } | tojson }}
     </script>
-    <script src="/static/reader.js"></script>
+    <script src="{{ static_url('reader.js') }}"></script>
 </body>
 </html>

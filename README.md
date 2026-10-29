@@ -1,6 +1,6 @@
 # reader 3
 
-![reader3](reader3.png)
+![reader3](docs/reader3.png)
 
 A lightweight, self-hosted EPUB reader that lets you read through EPUB books one chapter at a time. This makes it very easy to copy paste the contents of a chapter to an LLM, to read along. Basically - get epub books (e.g. [Project Gutenberg](https://www.gutenberg.org/) has many), open them up in this reader, copy paste text around to your favorite LLM, and read together and along.
 

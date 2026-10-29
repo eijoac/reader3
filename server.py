@@ -37,13 +37,31 @@ SECURITY_HEADERS = {
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
+    if request.url.path.startswith("/static/") and response.status_code in (200, 304):
+        # Pages link assets as ?v=<mtime> (see static_url), so a versioned URL never goes stale
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable" if "v" in request.query_params else "no-cache"
+        )
     for name, value in SECURITY_HEADERS.items():
         response.headers.setdefault(name, value)
     return response
 
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
-templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+
+def static_url(name: str) -> str:
+    """URL of a static file, versioned by its modification time so browsers can cache it indefinitely."""
+    return f"/static/{name}?v={(BASE_DIR / 'static' / name).stat().st_mtime_ns}"
+
+
+def make_templates(directory) -> Jinja2Templates:
+    result = Jinja2Templates(directory=directory)
+    result.env.globals["static_url"] = static_url
+    return result
+
+
+templates = make_templates(BASE_DIR / "templates")
 
 # Where are the book folders located?
 BOOKS_DIR = "library"

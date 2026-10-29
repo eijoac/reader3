@@ -1,14 +1,12 @@
 import json
-import sys
 from pathlib import Path
 
 import pytest
 from ebooklib import epub
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+from converter import convert
 
-from converter import convert  # noqa: E402
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def png(tag: str) -> bytes:
@@ -102,14 +100,12 @@ def library(tmp_path, converted, monkeypatch):
     """A library dir holding one converted book, wired into the server module."""
     import shutil
 
-    from fastapi.templating import Jinja2Templates
-
     import server
 
     _, out = converted
     shutil.copytree(out, tmp_path / "Test_data")
     monkeypatch.setattr(server, "BOOKS_DIR", str(tmp_path))
-    monkeypatch.setattr(server, "templates", Jinja2Templates(directory=str(ROOT / "templates")))
+    monkeypatch.setattr(server, "templates", server.make_templates(ROOT / "templates"))
     server._load_book.cache_clear()
     yield tmp_path
     server._load_book.cache_clear()

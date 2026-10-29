@@ -191,3 +191,36 @@ def test_meta_summary(converted):
     meta = storage.read_summary(str(out))
     assert meta["title"] == "Test Book" and meta["authors"] == ["Test Author"]
     assert meta["chapters"] > 0
+
+
+def _write_simple_epub(path, pages: dict, language: str | None = "en"):
+    bk = epub.EpubBook()
+    bk.set_identifier("x")
+    bk.set_title("T")
+    if language:
+        bk.set_language(language)
+    items = []
+    for name, body in pages.items():
+        item = epub.EpubHtml(title="", file_name=name)
+        item.content = f"<html><body>{body}</body></html>"
+        bk.add_item(item)
+        items.append(item)
+    bk.add_item(epub.EpubNcx())
+    bk.add_item(epub.EpubNav())
+    bk.spine = items
+    epub.write_epub(str(path), bk)
+    return path
+
+
+def test_fallback_toc_titles_use_first_heading(tmp_path):
+    path = _write_simple_epub(tmp_path / "t.epub", {
+        "a_b.xhtml": "<h2>The Real Title</h2><p>x</p>",
+        "plain_page.xhtml": "<p>no heading</p>",
+    })
+    titles = [e.title for e in toc.get_fallback_toc(epub.read_epub(str(path)))]
+    assert titles == ["The Real Title", "Plain Page"]
+
+
+def test_missing_language_stays_empty(tmp_path):
+    path = _write_simple_epub(tmp_path / "nolang.epub", {"c.xhtml": "<p>hi</p>"}, language=None)
+    assert convert.convert_epub(str(path), str(tmp_path / "o_data")).metadata.language == ""
