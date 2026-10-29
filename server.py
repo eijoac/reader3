@@ -2,7 +2,7 @@ import logging
 import os
 import posixpath
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -81,20 +81,29 @@ def _raise_if_outdated(book_id: str):
         )
 
 
+@dataclass(frozen=True)
+class LoadedBook:
+    """A book plus everything derived from it that is the same on every request."""
+
+    book: Book
+    toc_index: dict[str, int]  # TOC href -> chapter index; read-only, shared between requests
+
+
 @lru_cache(maxsize=16)
-def _load_book(folder_name: str, mtime_ns: int) -> Book | None:
+def _load_book(folder_name: str, mtime_ns: int) -> LoadedBook | None:
     # mtime_ns is unused in the body; it is part of the cache key so a reprocessed book is reloaded
     try:
-        return load_book_file(os.path.join(BOOKS_DIR, folder_name))
+        book = load_book_file(os.path.join(BOOKS_DIR, folder_name))
     except Exception:
         log.exception("Error loading book %s", folder_name)
         return None
+    return LoadedBook(book, _toc_index_map(book))
 
 
-def load_book_cached(folder_name: str) -> Book | None:
+def load_loaded_book(folder_name: str) -> LoadedBook | None:
     """
-    Loads the book from book.json.
-    Cached so we don't re-read the disk on every click, but the cache is
+    Loads the book from book.json together with its derived data.
+    Cached so we don't re-read or re-derive anything on every click, but the cache is
     invalidated whenever book.json changes (e.g. the book is reprocessed).
     """
     if not _is_valid_book_id(folder_name):
@@ -105,6 +114,11 @@ def load_book_cached(folder_name: str) -> Book | None:
     except OSError:
         return None
     return _load_book(folder_name, mtime_ns)
+
+
+def load_book_cached(folder_name: str) -> Book | None:
+    loaded = load_loaded_book(folder_name)
+    return loaded.book if loaded else None
 
 
 def _toc_index_map(book: Book) -> dict[str, int]:
@@ -129,6 +143,7 @@ def _toc_index_map(book: Book) -> dict[str, int]:
 
     walk(book.toc)
     return result
+
 
 @app.get("/", response_class=HTMLResponse)
 def library_view(request: Request):
@@ -202,10 +217,11 @@ def _resolve_chapter(book: Book, ref: str) -> int | None:
 @app.get("/read/{book_id}/{chapter_ref:path}", response_class=HTMLResponse)
 def read_chapter(request: Request, book_id: str, chapter_ref: str):
     """The main reader interface. Accepts either integer index or filename."""
-    book = load_book_cached(book_id)
-    if not book:
+    loaded = load_loaded_book(book_id)
+    if not loaded:
         _raise_if_outdated(book_id)
         raise HTTPException(status_code=404, detail="Book not found")
+    book = loaded.book
 
     chapter_index = _resolve_chapter(book, chapter_ref)
     if chapter_index is None:
@@ -232,7 +248,7 @@ def read_chapter(request: Request, book_id: str, chapter_ref: str):
         "chapter_index": chapter_index,
         "book_id": book_id,
         "book_url": book_url,
-        "toc_index": _toc_index_map(book),
+        "toc_index": loaded.toc_index,
         "prev_idx": prev_idx,
         "next_idx": next_idx
     })

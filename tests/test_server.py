@@ -222,3 +222,30 @@ def test_cache_reloads_when_book_is_reprocessed(library):
     st = path.stat()
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
     assert server.load_book_cached("Test_data").metadata.title == "Changed Title"
+
+
+def test_toc_index_is_computed_once_per_book_version(library, monkeypatch):
+    calls = []
+    real = server._toc_index_map
+    monkeypatch.setattr(server, "_toc_index_map", lambda book: calls.append(1) or real(book))
+    server._load_book.cache_clear()
+    first = server.load_loaded_book("Test_data")
+    for _ in range(3):
+        assert server.load_loaded_book("Test_data") is first
+    assert first.toc_index and len(calls) == 1
+
+    path = library / "Test_data" / "book.json"
+    path.write_text(path.read_text())
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
+    server.load_loaded_book("Test_data")
+    assert len(calls) == 2  # recomputed after the book was reprocessed
+
+
+def test_reader_does_not_rebuild_toc_map_per_request(client, monkeypatch):
+    client.get("/read/Test_data/0")  # warm the cache
+
+    def boom(book):
+        raise AssertionError("toc map must come from the cache")
+    monkeypatch.setattr(server, "_toc_index_map", boom)
+    assert client.get("/read/Test_data/1").status_code == 200
