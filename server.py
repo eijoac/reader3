@@ -92,7 +92,7 @@ def _book_dir(book_id: str) -> str:
 
 def _raise_if_outdated(book_id: str):
     if is_legacy_book(os.path.join(BOOKS_DIR, book_id)):
-        name = book_id[:-len("_data")]
+        name = book_id[: -len("_data")]
         raise HTTPException(
             status_code=409,
             detail=f"This book was converted by an older version. Run: uv run reader3.py reprocess {name}",
@@ -148,7 +148,7 @@ def _toc_index_map(book: Book) -> dict[str, int]:
     first_in_file: dict[str, int] = {}
     for idx, chapter in enumerate(book.spine):
         exact.setdefault(chapter.href, idx)
-        first_in_file.setdefault(chapter.href.split('#')[0], idx)
+        first_in_file.setdefault(chapter.href.split("#")[0], idx)
 
     result: dict[str, int] = {}
 
@@ -176,21 +176,30 @@ def library_view(request: Request):
                 continue
             meta = read_summary(folder_path)
             if meta:
-                books.append({
-                    "id": item,
-                    "title": meta["title"],
-                    "author": ", ".join(meta.get("authors", [])),
-                    "chapters": meta.get("chapters", 0),
-                    "has_cover": bool(meta.get("cover_image")),
-                    "outdated": False,
-                })
+                books.append(
+                    {
+                        "id": item,
+                        "title": meta["title"],
+                        "author": ", ".join(meta.get("authors", [])),
+                        "chapters": meta.get("chapters", 0),
+                        "has_cover": bool(meta.get("cover_image")),
+                        "outdated": False,
+                    }
+                )
             elif is_legacy_book(folder_path):
-                books.append({
-                    "id": item, "title": item[:-len("_data")], "author": "", "chapters": 0,
-                    "has_cover": False, "outdated": True,
-                })
+                books.append(
+                    {
+                        "id": item,
+                        "title": item[: -len("_data")],
+                        "author": "",
+                        "chapters": 0,
+                        "has_cover": False,
+                        "outdated": True,
+                    }
+                )
 
     return templates.TemplateResponse(request, "library.html", {"books": books})
+
 
 @app.get("/read/{book_id}/images/{image_name}")
 def serve_image(book_id: str, image_name: str):
@@ -206,6 +215,7 @@ def serve_image(book_id: str, image_name: str):
         raise HTTPException(status_code=404, detail="Image not found")
 
     return FileResponse(img_path)
+
 
 @app.get("/read/{book_id}")
 def redirect_to_first_chapter(book_id: str):
@@ -226,7 +236,7 @@ def _resolve_chapter(book: Book, ref: str) -> int | None:
         if ref in (chapter.href, chapter.id):
             return idx
     for idx, chapter in enumerate(book.spine):
-        file_href = chapter.href.split('#')[0]
+        file_href = chapter.href.split("#")[0]
         if ref in (file_href, posixpath.basename(file_href)):
             return idx
     return None
@@ -247,12 +257,13 @@ def read_chapter(request: Request, book_id: str, chapter_ref: str):
     if chapter_index >= len(book.spine):
         raise HTTPException(status_code=404, detail="Chapter index out of range")
 
-    book_url = quote(book_id, safe='')
+    book_url = quote(book_id, safe="")
 
     # Replace __CHAPTER__ markers in content with actual URLs (optional fragment preserved)
     def repl(m):
-        frag = m.group(2) or ''
+        frag = m.group(2) or ""
         return f'href="/read/{book_url}/{m.group(1)}{frag}"'
+
     content = CHAPTER_LINK_RE.sub(repl, book.spine[chapter_index].content)
     current_chapter = replace(book.spine[chapter_index], content=content)
 
@@ -260,16 +271,21 @@ def read_chapter(request: Request, book_id: str, chapter_ref: str):
     prev_idx = chapter_index - 1 if chapter_index > 0 else None
     next_idx = chapter_index + 1 if chapter_index < len(book.spine) - 1 else None
 
-    return templates.TemplateResponse(request, "reader.html", {
-        "book": book,
-        "current_chapter": current_chapter,
-        "chapter_index": chapter_index,
-        "book_id": book_id,
-        "book_url": book_url,
-        "toc_index": loaded.toc_index,
-        "prev_idx": prev_idx,
-        "next_idx": next_idx
-    })
+    return templates.TemplateResponse(
+        request,
+        "reader.html",
+        {
+            "book": book,
+            "current_chapter": current_chapter,
+            "chapter_index": chapter_index,
+            "book_id": book_id,
+            "book_url": book_url,
+            "toc_index": loaded.toc_index,
+            "prev_idx": prev_idx,
+            "next_idx": next_idx,
+        },
+    )
+
 
 @app.get("/cover/{book_id}")
 def serve_cover(book_id: str):
@@ -288,6 +304,8 @@ def serve_cover(book_id: str):
 
     return FileResponse(cover_path)
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="127.0.0.1", port=8123)

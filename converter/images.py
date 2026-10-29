@@ -17,7 +17,7 @@ def _unique_image_name(item_name: str, used_names: set, prefix: str = "") -> str
     Images in different EPUB folders can share a basename (a/1.png, b/1.png), and
     different names can sanitize to the same string, so a numeric suffix is added on collision.
     """
-    clean = "".join(c for c in os.path.basename(item_name) if c.isalnum() or c in '._-').strip() or "image"
+    clean = "".join(c for c in os.path.basename(item_name) if c.isalnum() or c in "._-").strip() or "image"
     stem, ext = os.path.splitext(clean)
     name = prefix + clean
     counter = 2
@@ -30,7 +30,7 @@ def _unique_image_name(item_name: str, used_names: set, prefix: str = "") -> str
 
 def _save_cover(item, images_dir: str, used_names: set) -> str:
     name = _unique_image_name(item.get_name(), used_names, prefix="cover_")
-    with open(os.path.join(images_dir, name), 'wb') as f:
+    with open(os.path.join(images_dir, name), "wb") as f:
         f.write(item.get_content())
     return f"images/{name}"
 
@@ -56,9 +56,9 @@ def extract_cover_image(book_obj, images_dir: str, used_names: set) -> str | Non
 
     # Method 2: Check metadata for cover reference
     try:
-        cover_meta = book_obj.get_metadata('OPF', 'cover')
+        cover_meta = book_obj.get_metadata("OPF", "cover")
         if cover_meta:
-            cover_id = cover_meta[0][1].get('content') if cover_meta[0][1] else cover_meta[0][0]
+            cover_id = cover_meta[0][1].get("content") if cover_meta[0][1] else cover_meta[0][0]
             if cover_id:
                 for item in book_obj.get_items():
                     if item.get_id() == cover_id or item.get_name().endswith(cover_id):
@@ -67,7 +67,7 @@ def extract_cover_image(book_obj, images_dir: str, used_names: set) -> str | Non
         log.warning("Cover lookup via metadata failed: %s", e)
 
     # Method 3: Look for common cover image names
-    cover_patterns = ['cover', 'Cover', 'COVER', 'front']
+    cover_patterns = ["cover", "Cover", "COVER", "front"]
     for item in book_obj.get_items():
         if item.get_type() == ebooklib.ITEM_IMAGE:
             name = item.get_name().lower()
@@ -93,7 +93,7 @@ def extract_images(book_obj, images_dir: str, used_names: set) -> dict[str, str]
     for item in book_obj.get_items():
         if item.get_type() in (ebooklib.ITEM_IMAGE, ebooklib.ITEM_COVER):
             safe_fname = _unique_image_name(item.get_name(), used_names)
-            with open(os.path.join(images_dir, safe_fname), 'wb') as f:
+            with open(os.path.join(images_dir, safe_fname), "wb") as f:
                 f.write(item.get_content())
             rel_path = f"images/{safe_fname}"
             image_map[item.get_name()] = rel_path
@@ -108,13 +108,13 @@ def extract_images(book_obj, images_dir: str, used_names: set) -> dict[str, str]
 
 def rewrite_image_sources(soup: BeautifulSoup, doc_name: str, image_map: dict[str, str]) -> None:
     """Points <img src> and SVG <image xlink:href|href> (cover-page wrappers) at the extracted files."""
-    for img in soup.find_all(['img', 'image']):
-        attrs = ('src',) if img.name == 'img' else ('xlink:href', 'href')
+    for img in soup.find_all(["img", "image"]):
+        attrs = ("src",) if img.name == "img" else ("xlink:href", "href")
         for attr in attrs:
-            src = img.get(attr, '')
+            src = img.get(attr, "")
             if not src:
                 continue
-            src_decoded = unquote(src).split('#', 1)[0].split('?', 1)[0]
+            src_decoded = unquote(src).split("#", 1)[0].split("?", 1)[0]
             resolved = posixpath.normpath(posixpath.join(posixpath.dirname(doc_name), src_decoded))
             for candidate in (resolved, src_decoded, posixpath.basename(src_decoded)):
                 if candidate in image_map:

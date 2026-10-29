@@ -213,10 +213,13 @@ def _write_simple_epub(path, pages: dict, language: str | None = "en"):
 
 
 def test_fallback_toc_titles_use_first_heading(tmp_path):
-    path = _write_simple_epub(tmp_path / "t.epub", {
-        "a_b.xhtml": "<h2>The Real Title</h2><p>x</p>",
-        "plain_page.xhtml": "<p>no heading</p>",
-    })
+    path = _write_simple_epub(
+        tmp_path / "t.epub",
+        {
+            "a_b.xhtml": "<h2>The Real Title</h2><p>x</p>",
+            "plain_page.xhtml": "<p>no heading</p>",
+        },
+    )
     titles = [e.title for e in toc.get_fallback_toc(epub.read_epub(str(path)))]
     assert titles == ["The Real Title", "Plain Page"]
 

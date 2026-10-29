@@ -24,9 +24,10 @@ def _book_names(library_dir: str) -> list[str]:
     if not os.path.isdir(library_dir):
         return []
     return sorted(
-        d[:-len("_data")] for d in os.listdir(library_dir)
-        if d.endswith("_data") and (
-            os.path.isfile(os.path.join(library_dir, d, BOOK_FILE)) or is_legacy_book(os.path.join(library_dir, d)))
+        d[: -len("_data")]
+        for d in os.listdir(library_dir)
+        if d.endswith("_data")
+        and (os.path.isfile(os.path.join(library_dir, d, BOOK_FILE)) or is_legacy_book(os.path.join(library_dir, d)))
     )
 
 

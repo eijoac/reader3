@@ -46,14 +46,14 @@ def build_epub(path: Path) -> Path:
         "img/pic.png": "LOW",
     }
     for name, tag in images.items():
-        bk.add_item(epub.EpubItem(uid=name.replace("/", "_"), file_name=name,
-                                  media_type="image/png", content=png(tag)))
-    bk.add_item(epub.EpubItem(uid="cover_img", file_name="cover.png",
-                              media_type="image/png", content=png("COVER")))
+        bk.add_item(epub.EpubItem(uid=name.replace("/", "_"), file_name=name, media_type="image/png", content=png(tag)))
+    bk.add_item(epub.EpubItem(uid="cover_img", file_name="cover.png", media_type="image/png", content=png("COVER")))
 
     cover = epub.EpubHtml(title="Cover", file_name="cover.xhtml", lang="en")
-    cover.content = ('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
-                     '<image xlink:href="cover.png"/></svg>')
+    cover.content = (
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+        '<image xlink:href="cover.png"/></svg>'
+    )
 
     ch1 = epub.EpubHtml(title="One", file_name="text/ch1.xhtml", lang="en")
     ch1.content = (
@@ -63,9 +63,9 @@ def build_epub(path: Path) -> Path:
         '<h1 id="b">Part B</h1><p>beta text</p>'
     )
     ch2 = epub.EpubHtml(title="Two", file_name="text/ch2.xhtml", lang="en")
-    ch2.content = ('<h1>Two</h1><p>second chapter</p>'
-                   '<a href="ch1.xhtml#b">to part b</a> <a href="#local">local</a>'
-                   + HOSTILE_BODY)
+    ch2.content = (
+        '<h1>Two</h1><p>second chapter</p><a href="ch1.xhtml#b">to part b</a> <a href="#local">local</a>' + HOSTILE_BODY
+    )
     extra = epub.EpubHtml(title="Extra", file_name="text/extra.xhtml", lang="en")
     extra.content = "<h1>Not in TOC</h1><p>extra text</p>"
 
@@ -116,6 +116,7 @@ def client(library):
     from fastapi.testclient import TestClient
 
     import server
+
     return TestClient(server.app)
 
 

@@ -56,12 +56,13 @@ def read_summary(book_dir: str) -> dict | None:
             meta = json.load(f)
         if meta.get("format_version") == FORMAT_VERSION and isinstance(meta.get("title"), str):
             return meta
-    except (OSError, ValueError):
+    except OSError, ValueError:
         pass
     return None
 
 
 def is_legacy_book(book_dir: str) -> bool:
     """True for folders written by older versions (book.pkl only), which need reprocessing."""
-    return (os.path.isfile(os.path.join(book_dir, LEGACY_BOOK_FILE))
-            and not os.path.isfile(os.path.join(book_dir, BOOK_FILE)))
+    return os.path.isfile(os.path.join(book_dir, LEGACY_BOOK_FILE)) and not os.path.isfile(
+        os.path.join(book_dir, BOOK_FILE)
+    )

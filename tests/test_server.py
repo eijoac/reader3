@@ -64,10 +64,19 @@ def test_images_and_cover_served(client, converted):
     assert client.get("/read/Test_data/images/..%2Fbook.json").status_code == 404
 
 
-@pytest.mark.parametrize("path", [
-    "/read/..%2F..%2Fetc/0", "/read/%2e%2e/0", "/read/library/0", "/read/Nope_data/0",
-    "/cover/%2e%2e", "/cover/Nope_data", "/read/Nope_data", "/read/Test%00_data/0",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/read/..%2F..%2Fetc/0",
+        "/read/%2e%2e/0",
+        "/read/library/0",
+        "/read/Nope_data/0",
+        "/cover/%2e%2e",
+        "/cover/Nope_data",
+        "/read/Nope_data",
+        "/read/Test%00_data/0",
+    ],
+)
 def test_invalid_book_ids_are_404(client, path):
     assert client.get(path, follow_redirects=False).status_code == 404
 
@@ -119,6 +128,7 @@ def test_other_format_version_is_not_loaded(client, library):
 def test_library_page_does_not_load_books(client, monkeypatch):
     def boom(*a, **k):
         raise AssertionError("library page must only read meta.json")
+
     monkeypatch.setattr(server, "load_book_file", boom)
     r = client.get("/")
     assert "Test Book" in r.text
@@ -136,8 +146,13 @@ def _reader_config(html: str) -> dict:
 
 
 def test_static_assets_are_served(client):
-    for path, marker in [("theme.js", "toggleTheme"), ("reader.js", "reader-config"),
-                         ("reader.css", "--font-scale"), ("library.js", "read-btn"), ("library.css", "book-grid")]:
+    for path, marker in [
+        ("theme.js", "toggleTheme"),
+        ("reader.js", "reader-config"),
+        ("reader.css", "--font-scale"),
+        ("library.js", "read-btn"),
+        ("library.css", "book-grid"),
+    ]:
         r = client.get(f"/static/{path}")
         assert r.status_code == 200 and marker in r.text, path
     assert client.get("/static/../server.py").status_code == 404
@@ -168,6 +183,7 @@ def test_security_headers_on_every_response(client, url):
 def test_routes_are_threadpool_functions():
     # async routes would run blocking file/JSON work on the event loop
     import inspect
+
     for route in server.app.routes:
         endpoint = getattr(route, "endpoint", None)
         if endpoint and getattr(route, "path", "").startswith(("/read", "/cover")) or getattr(route, "path", "") == "/":
@@ -178,9 +194,13 @@ def test_reader_has_theme_keyboard_and_position_hooks(client):
     html = client.get("/read/Test_data/2").text
     assert 'id="theme-toggle"' in html
     config = _reader_config(html)
-    assert config == {"bookId": "Test_data", "chapter": 2,
-                      "prevUrl": "/read/Test_data/1", "nextUrl": "/read/Test_data/3"}
-    assert '/static/reader.js' in html and '/static/theme.js' in html
+    assert config == {
+        "bookId": "Test_data",
+        "chapter": 2,
+        "prevUrl": "/read/Test_data/1",
+        "nextUrl": "/read/Test_data/3",
+    }
+    assert "/static/reader.js" in html and "/static/theme.js" in html
 
 
 def test_reader_has_font_controls_and_book_language(client):
@@ -247,6 +267,7 @@ def test_reader_does_not_rebuild_toc_map_per_request(client, monkeypatch):
 
     def boom(book):
         raise AssertionError("toc map must come from the cache")
+
     monkeypatch.setattr(server, "_toc_index_map", boom)
     assert client.get("/read/Test_data/1").status_code == 200
 

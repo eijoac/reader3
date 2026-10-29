@@ -21,11 +21,11 @@ class _AnchorIndex:
         self._all_by_id: dict[str, list[Tag]] = {}
         self._by_name: dict[str, Tag] = {}
         for tag in soup.find_all(True):
-            tag_id = tag.get('id')
+            tag_id = tag.get("id")
             if tag_id:
                 self._all_by_id.setdefault(tag_id, []).append(tag)
                 self._by_id.setdefault(tag_id, tag)
-            tag_name = tag.get('name')
+            tag_name = tag.get("name")
             if tag_name and tag_name not in self._by_name:
                 self._by_name[tag_name] = tag
         self._positions: dict[int, int] | None = None
@@ -51,7 +51,7 @@ class _AnchorIndex:
         if tag is None:
             return 0
         if self._body_positions is None:
-            body = self.soup.find('body') or self.soup
+            body = self.soup.find("body") or self.soup
             self._body_positions = {id(el): i for i, el in enumerate(body.descendants, start=1)}
             self._body_positions[-1] = len(self._body_positions) + 1
         return self._body_positions.get(id(tag), self._body_positions[-1])
@@ -59,30 +59,35 @@ class _AnchorIndex:
 
 def _fallback_title(soup: BeautifulSoup, file_href: str) -> str:
     """Best-effort title for a document that has no TOC entry: first heading, else filename."""
-    heading = soup.find(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+    heading = soup.find(["h1", "h2", "h3", "h4", "h5", "h6"])
     if heading:
-        text = ' '.join(heading.get_text(separator=' ').split())
+        text = " ".join(heading.get_text(separator=" ").split())
         if text:
             return text
     stem = os.path.splitext(os.path.basename(file_href))[0]
-    return stem.replace('_', ' ').strip().title() or file_href
+    return stem.replace("_", " ").strip().title() or file_href
 
 
 def _has_content(fragment_html: str) -> bool:
     """True if the fragment has visible text or an image (so it is worth a chapter of its own)."""
-    frag = BeautifulSoup(fragment_html, 'html.parser')
-    return bool(extract_plain_text(frag)) or frag.find(['img', 'svg', 'image']) is not None
+    frag = BeautifulSoup(fragment_html, "html.parser")
+    return bool(extract_plain_text(frag)) or frag.find(["img", "svg", "image"]) is not None
 
 
-def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: str | None, stop_anchors: list[str],
-                           allow_empty: bool = False, index: _AnchorIndex | None = None) -> str:
+def _slice_html_by_anchors(
+    soup: BeautifulSoup,
+    start_anchor: str | None,
+    stop_anchors: list[str],
+    allow_empty: bool = False,
+    index: _AnchorIndex | None = None,
+) -> str:
     """
     Returns an HTML fragment starting at `start_anchor` (or top of body when None)
     and ending right before the next occurrence of any of `stop_anchors`.
     Best-effort: works well when chapters start at headers or elements with id.
     With `allow_empty`, an empty slice is returned as "" instead of the whole body.
     """
-    body = soup.find('body')
+    body = soup.find("body")
     if not body:
         return str(soup)
     if index is None:
@@ -141,7 +146,7 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: str | None, stop_a
     start_containers = containing_children(index.all_with_id(start_anchor)) if start_node is not None else set()
     stop_containers: set = set()
     if stop_tag is not None:
-        stop_id = stop_tag.get('id')
+        stop_id = stop_tag.get("id")
         stop_containers = containing_children([stop_tag] + (index.all_with_id(stop_id) if stop_id else []))
 
     # Collect HTML between start and stop

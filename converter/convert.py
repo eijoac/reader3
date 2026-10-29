@@ -24,7 +24,7 @@ from .toc import _flatten_toc, get_fallback_toc, parse_toc_recursive
 log = logging.getLogger(__name__)
 
 INTERNAL_LINK_MARK = "__INTERNAL_LINK__"
-INTERNAL_LINK_RE = re.compile(r'href=(["\'])' + INTERNAL_LINK_MARK + r'(.*?)\1', re.DOTALL)
+INTERNAL_LINK_RE = re.compile(r'href=(["\'])' + INTERNAL_LINK_MARK + r"(.*?)\1", re.DOTALL)
 
 
 def _load_documents(book: epub.EpubBook, image_map: dict[str, str]) -> dict[str, BeautifulSoup]:
@@ -34,9 +34,9 @@ def _load_documents(book: epub.EpubBook, image_map: dict[str, str]) -> dict[str,
         if item.get_type() != ebooklib.ITEM_DOCUMENT:
             continue
         name = item.get_name()
-        raw_content = item.get_content().decode('utf-8', errors='ignore')
+        raw_content = item.get_content().decode("utf-8", errors="ignore")
         # Sanitize first: the rewrites below must only ever see already-vetted markup
-        soup = clean_html_content(BeautifulSoup(raw_content, 'html.parser'))
+        soup = clean_html_content(BeautifulSoup(raw_content, "html.parser"))
         rewrite_image_sources(soup, name, image_map)
         _mark_internal_links(soup)
         soups[name] = soup
@@ -45,17 +45,17 @@ def _load_documents(book: epub.EpubBook, image_map: dict[str, str]) -> dict[str,
 
 def _mark_internal_links(soup: BeautifulSoup) -> None:
     """Prefixes epub-internal hrefs with a marker; they become chapter links once indices are known."""
-    for link in soup.find_all('a'):
-        href = link.get('href', '')
-        if not href or href.lstrip().startswith('#') or url_scheme(href) is not None:
+    for link in soup.find_all("a"):
+        href = link.get("href", "")
+        if not href or href.lstrip().startswith("#") or url_scheme(href) is not None:
             # External links (already vetted by the sanitizer), email, or same-page anchors
             continue
         href_decoded = unquote(href)
         # Percent-decoding can reveal a scheme the sanitizer couldn't see (e.g. "java%73cript:")
         if url_scheme(href_decoded) is not None:
-            del link['href']
+            del link["href"]
             continue
-        link['href'] = f"{INTERNAL_LINK_MARK}{href_decoded}"
+        link["href"] = f"{INTERNAL_LINK_MARK}{href_decoded}"
 
 
 def _reading_order(book: epub.EpubBook, flat_toc: list[TOCEntry], soups: dict[str, BeautifulSoup]) -> list[str]:
@@ -74,8 +74,8 @@ def _reading_order(book: epub.EpubBook, flat_toc: list[TOCEntry], soups: dict[st
 
 
 def _document_anchors(soup: BeautifulSoup) -> list[str]:
-    anchors = [tag['id'] for tag in soup.find_all(id=True)]
-    anchors += [tag['name'] for tag in soup.find_all(attrs={"name": True})]
+    anchors = [tag["id"] for tag in soup.find_all(id=True)]
+    anchors += [tag["name"] for tag in soup.find_all(attrs={"name": True})]
     return anchors
 
 
@@ -131,21 +131,24 @@ def _build_chapters(
         for anchor, title in starts:
             stop_anchors = [a for a in toc_anchors if a != anchor]
             fragment_html = _slice_html_by_anchors(
-                soup, anchor, stop_anchors, allow_empty=anchor is None and bool(toc_anchors), index=index)
+                soup, anchor, stop_anchors, allow_empty=anchor is None and bool(toc_anchors), index=index
+            )
             # Only skip chapters we invented ourselves; TOC-listed ones must stay linkable
             if synthetic_start and anchor is None and not _has_content(fragment_html):
                 continue
 
-            frag_soup = BeautifulSoup(fragment_html, 'html.parser')
+            frag_soup = BeautifulSoup(fragment_html, "html.parser")
             ch_href = f"{file_href}#{anchor}" if anchor else file_href
-            chapters.append(ChapterContent(
-                id=ch_href,
-                href=ch_href,
-                title=title or _fallback_title(frag_soup, file_href),
-                content=fragment_html,
-                text=extract_plain_text(frag_soup),
-                order=len(chapters),
-            ))
+            chapters.append(
+                ChapterContent(
+                    id=ch_href,
+                    href=ch_href,
+                    title=title or _fallback_title(frag_soup, file_href),
+                    content=fragment_html,
+                    text=extract_plain_text(frag_soup),
+                    order=len(chapters),
+                )
+            )
 
             current_index = len(chapters) - 1
             href_to_index[ch_href] = current_index
@@ -153,7 +156,7 @@ def _build_chapters(
             href_to_index.setdefault(file_href, current_index)
             href_to_index.setdefault(os.path.basename(file_href), current_index)
             if anchor:
-                href_to_index[os.path.basename(file_href) + '#' + anchor] = current_index
+                href_to_index[os.path.basename(file_href) + "#" + anchor] = current_index
 
     return chapters, href_to_index
 
@@ -167,7 +170,7 @@ def _map_other_anchors(
     """Links to anchors that don't start a chapter resolve to the chapter whose slice contains them."""
     chapters_by_file: dict[str, list[tuple[str | None, int]]] = {}
     for i, ch in enumerate(chapters):
-        ch_file, _, ch_anchor = ch.href.partition('#')
+        ch_file, _, ch_anchor = ch.href.partition("#")
         chapters_by_file.setdefault(ch_file, []).append((ch_anchor or None, i))
 
     for file_name, soup in soups.items():
@@ -213,7 +216,7 @@ def _map_other_anchors(
                     chosen_idx = prev_idx
             if chosen_idx is not None:
                 href_to_index[f"{file_name}#{anchor_id}"] = chosen_idx
-                href_to_index[os.path.basename(file_name) + '#' + anchor_id] = chosen_idx
+                href_to_index[os.path.basename(file_name) + "#" + anchor_id] = chosen_idx
 
 
 def _rewrite_internal_links(chapters: list[ChapterContent], href_to_index: dict[str, int]) -> None:
@@ -224,13 +227,13 @@ def _rewrite_internal_links(chapters: list[ChapterContent], href_to_index: dict[
         chapter_idx = href_to_index.get(old_href)
         if chapter_idx is None:
             return m.group(0)
-        frag = '#' + old_href.split('#', 1)[1] if '#' in old_href else ''
-        return f'href={quote}__CHAPTER__{chapter_idx}{frag}{quote}'
+        frag = "#" + old_href.split("#", 1)[1] if "#" in old_href else ""
+        return f"href={quote}__CHAPTER__{chapter_idx}{frag}{quote}"
 
     for chapter in chapters:
         content = INTERNAL_LINK_RE.sub(rewrite_link, chapter.content)
         # Unresolvable links: just strip the marker and leave them relative (better than breaking)
-        chapter.content = content.replace(INTERNAL_LINK_MARK, '')
+        chapter.content = content.replace(INTERNAL_LINK_MARK, "")
 
 
 def process_epub(epub_path: str, output_dir: str) -> Book:
@@ -239,7 +242,7 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
     book = epub.read_epub(epub_path)
     metadata = extract_metadata_robust(book)
 
-    images_dir = os.path.join(output_dir, 'images')
+    images_dir = os.path.join(output_dir, "images")
     os.makedirs(images_dir, exist_ok=True)
 
     log.info("Extracting cover image...")

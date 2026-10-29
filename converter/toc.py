@@ -1,6 +1,5 @@
 """Table of contents parsing."""
 
-
 import ebooklib
 from bs4 import BeautifulSoup
 from ebooklib import epub
@@ -10,7 +9,7 @@ from .slicing import _fallback_title
 
 
 def _make_toc_entry(title: str, href: str, children: list[TOCEntry] | None = None) -> TOCEntry:
-    file_href, _, anchor = href.partition('#')
+    file_href, _, anchor = href.partition("#")
     return TOCEntry(title=title, href=href, file_href=file_href, anchor=anchor, children=children or [])
 
 
@@ -42,10 +41,9 @@ def get_fallback_toc(book_obj) -> list[TOCEntry]:
         if item is None or item.get_type() != ebooklib.ITEM_DOCUMENT:
             continue
         name = item.get_name()
-        soup = BeautifulSoup(item.get_content().decode('utf-8', errors='ignore'), 'html.parser')
+        soup = BeautifulSoup(item.get_content().decode("utf-8", errors="ignore"), "html.parser")
         toc.append(_make_toc_entry(_fallback_title(soup, name), name))
     return toc
-
 
 
 def _flatten_toc(entries: list[TOCEntry]) -> list[TOCEntry]:
