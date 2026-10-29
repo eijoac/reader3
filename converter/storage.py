@@ -3,10 +3,8 @@
 import json
 import os
 from dataclasses import asdict
-from typing import Optional
 
 from .models import Book, BookMetadata, ChapterContent, TOCEntry
-
 
 # Bump when the stored layout changes; books with another version must be reprocessed.
 FORMAT_VERSION = 4
@@ -47,14 +45,14 @@ def book_summary(book: Book) -> dict:
 
 
 def load_book_file(book_dir: str) -> Book:
-    with open(os.path.join(book_dir, BOOK_FILE), "r", encoding="utf-8") as f:
+    with open(os.path.join(book_dir, BOOK_FILE), encoding="utf-8") as f:
         return book_from_dict(json.load(f))
 
 
-def read_summary(book_dir: str) -> Optional[dict]:
+def read_summary(book_dir: str) -> dict | None:
     """The summary from meta.json, or None if it is missing, unreadable or from another format version."""
     try:
-        with open(os.path.join(book_dir, META_FILE), "r", encoding="utf-8") as f:
+        with open(os.path.join(book_dir, META_FILE), encoding="utf-8") as f:
             meta = json.load(f)
         if meta.get("format_version") == FORMAT_VERSION and isinstance(meta.get("title"), str):
             return meta

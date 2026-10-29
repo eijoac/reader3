@@ -1,9 +1,8 @@
 """HTML sanitising: drops active content and unsafe URLs from book markup."""
 
 import re
-from typing import Optional
-from bs4 import BeautifulSoup, Comment
 
+from bs4 import BeautifulSoup, Comment
 
 REMOVED_TAGS = [
     'script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet',
@@ -16,7 +15,7 @@ URL_ATTRS = ('href', 'src', 'xlink:href', 'action', 'formaction', 'poster', 'dat
 SAFE_URL_SCHEMES = ('http', 'https', 'mailto')
 
 
-def url_scheme(value: str) -> Optional[str]:
+def url_scheme(value: str) -> str | None:
     """Lowercased URL scheme as a browser would see it, or None for relative URLs and fragments."""
     # Browsers ignore whitespace/control characters inside the scheme (e.g. "java\tscript:")
     compact = ''.join(ch for ch in value if ch.isprintable() and not ch.isspace()).lower()

@@ -3,7 +3,6 @@
 import logging
 import os
 import posixpath
-from typing import Dict, List, Optional
 from urllib.parse import unquote
 
 import ebooklib
@@ -36,7 +35,7 @@ def _save_cover(item, images_dir: str, used_names: set) -> str:
     return f"images/{name}"
 
 
-def extract_cover_image(book_obj, images_dir: str, used_names: set) -> Optional[str]:
+def extract_cover_image(book_obj, images_dir: str, used_names: set) -> str | None:
     """
     Extracts the cover image from the epub.
     Tries multiple methods to find the cover.
@@ -49,12 +48,12 @@ def extract_cover_image(book_obj, images_dir: str, used_names: set) -> Optional[
             if item.get_type() == ebooklib.ITEM_COVER:
                 cover_item = item
                 break
-        
+
         if cover_item:
             return _save_cover(cover_item, images_dir, used_names)
     except Exception as e:
         log.warning("Cover lookup via ITEM_COVER failed: %s", e)
-    
+
     # Method 2: Check metadata for cover reference
     try:
         cover_meta = book_obj.get_metadata('OPF', 'cover')
@@ -66,7 +65,7 @@ def extract_cover_image(book_obj, images_dir: str, used_names: set) -> Optional[
                         return _save_cover(item, images_dir, used_names)
     except Exception as e:
         log.warning("Cover lookup via metadata failed: %s", e)
-    
+
     # Method 3: Look for common cover image names
     cover_patterns = ['cover', 'Cover', 'COVER', 'front']
     for item in book_obj.get_items():
@@ -74,23 +73,23 @@ def extract_cover_image(book_obj, images_dir: str, used_names: set) -> Optional[
             name = item.get_name().lower()
             if any(pattern.lower() in name for pattern in cover_patterns):
                 return _save_cover(item, images_dir, used_names)
-    
+
     # Method 4: Get the first image as a fallback
     for item in book_obj.get_items():
         if item.get_type() == ebooklib.ITEM_IMAGE:
             log.warning("Using first image as cover (no explicit cover found)")
             return _save_cover(item, images_dir, used_names)
-    
+
     return None
 
 
-def extract_images(book_obj, images_dir: str, used_names: set) -> Dict[str, str]:
+def extract_images(book_obj, images_dir: str, used_names: set) -> dict[str, str]:
     """
     Writes every image to `images_dir` and returns {epub path -> "images/<file>"}.
     A bare basename also maps to its image, but only when that basename is unambiguous.
     """
-    image_map: Dict[str, str] = {}
-    basename_targets: Dict[str, List[str]] = {}
+    image_map: dict[str, str] = {}
+    basename_targets: dict[str, list[str]] = {}
     for item in book_obj.get_items():
         if item.get_type() in (ebooklib.ITEM_IMAGE, ebooklib.ITEM_COVER):
             safe_fname = _unique_image_name(item.get_name(), used_names)
@@ -107,7 +106,7 @@ def extract_images(book_obj, images_dir: str, used_names: set) -> Dict[str, str]
     return image_map
 
 
-def rewrite_image_sources(soup: BeautifulSoup, doc_name: str, image_map: Dict[str, str]) -> None:
+def rewrite_image_sources(soup: BeautifulSoup, doc_name: str, image_map: dict[str, str]) -> None:
     """Points <img src> and SVG <image xlink:href|href> (cover-page wrappers) at the extracted files."""
     for img in soup.find_all(['img', 'image']):
         attrs = ('src',) if img.name == 'img' else ('xlink:href', 'href')

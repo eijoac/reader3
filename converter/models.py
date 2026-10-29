@@ -1,7 +1,6 @@
 """The book data model."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 
 @dataclass
@@ -25,7 +24,7 @@ class TOCEntry:
     href: str         # original href (e.g., 'part01.html#chapter1')
     file_href: str    # just the filename (e.g., 'part01.html')
     anchor: str       # just the anchor (e.g., 'chapter1'), empty if none
-    children: List['TOCEntry'] = field(default_factory=list)
+    children: list[TOCEntry] = field(default_factory=list)
 
 
 @dataclass
@@ -33,22 +32,22 @@ class BookMetadata:
     """Metadata"""
     title: str
     language: str
-    authors: List[str] = field(default_factory=list)
-    description: Optional[str] = None
-    publisher: Optional[str] = None
-    date: Optional[str] = None
-    identifiers: List[str] = field(default_factory=list)
-    subjects: List[str] = field(default_factory=list)
-    cover_image: Optional[str] = None  # Relative path to cover image
+    authors: list[str] = field(default_factory=list)
+    description: str | None = None
+    publisher: str | None = None
+    date: str | None = None
+    identifiers: list[str] = field(default_factory=list)
+    subjects: list[str] = field(default_factory=list)
+    cover_image: str | None = None  # Relative path to cover image
 
 
 @dataclass
 class Book:
     """The master object, stored as book.json."""
     metadata: BookMetadata
-    spine: List[ChapterContent]  # The actual content (linear files)
-    toc: List[TOCEntry]          # The navigation tree
-    images: Dict[str, str]       # Map: original_path -> local_path
+    spine: list[ChapterContent]  # The actual content (linear files)
+    toc: list[TOCEntry]          # The navigation tree
+    images: dict[str, str]       # Map: original_path -> local_path
 
     # Meta info
     source_file: str

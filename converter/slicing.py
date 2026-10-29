@@ -1,7 +1,7 @@
 """Splitting a document into chapters at TOC anchors."""
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from bs4 import BeautifulSoup
 from bs4.element import Tag
@@ -17,9 +17,9 @@ class _AnchorIndex:
 
     def __init__(self, soup: BeautifulSoup):
         self.soup = soup
-        self._by_id: Dict[str, Tag] = {}
-        self._all_by_id: Dict[str, List[Tag]] = {}
-        self._by_name: Dict[str, Tag] = {}
+        self._by_id: dict[str, Tag] = {}
+        self._all_by_id: dict[str, list[Tag]] = {}
+        self._by_name: dict[str, Tag] = {}
         for tag in soup.find_all(True):
             tag_id = tag.get('id')
             if tag_id:
@@ -28,25 +28,25 @@ class _AnchorIndex:
             tag_name = tag.get('name')
             if tag_name and tag_name not in self._by_name:
                 self._by_name[tag_name] = tag
-        self._positions: Optional[Dict[int, int]] = None
-        self._body_positions: Optional[Dict[int, int]] = None
+        self._positions: dict[int, int] | None = None
+        self._body_positions: dict[int, int] | None = None
 
-    def all_with_id(self, anchor: str) -> List[Tag]:
+    def all_with_id(self, anchor: str) -> list[Tag]:
         return self._all_by_id.get(anchor, [])
 
-    def find(self, anchor: Optional[str]) -> Optional[Tag]:
+    def find(self, anchor: str | None) -> Tag | None:
         """First element with id=anchor, else the first with name=anchor."""
         if not anchor:
             return None
         return self._by_id.get(anchor) or self._by_name.get(anchor)
 
-    def position(self, tag: Optional[Tag]) -> int:
+    def position(self, tag: Tag | None) -> int:
         """Document-order index of `tag`, or -1 if it is not in the document."""
         if self._positions is None:
             self._positions = {id(el): i for i, el in enumerate(self.soup.descendants)}
         return self._positions.get(id(tag), -1) if tag is not None else -1
 
-    def body_position(self, tag: Optional[Tag]) -> int:
+    def body_position(self, tag: Tag | None) -> int:
         """1-based position of `tag` among the body's descendants (past the end if absent)."""
         if tag is None:
             return 0
@@ -74,8 +74,8 @@ def _has_content(fragment_html: str) -> bool:
     return bool(extract_plain_text(frag)) or frag.find(['img', 'svg', 'image']) is not None
 
 
-def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], stop_anchors: List[str],
-                           allow_empty: bool = False, index: Optional[_AnchorIndex] = None) -> str:
+def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: str | None, stop_anchors: list[str],
+                           allow_empty: bool = False, index: _AnchorIndex | None = None) -> str:
     """
     Returns an HTML fragment starting at `start_anchor` (or top of body when None)
     and ending right before the next occurrence of any of `stop_anchors`.
@@ -96,11 +96,7 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], sto
         if not start_tag:
             # Anchor not found; return entire body as fallback
             return "".join(str(x) for x in body.contents)
-        # Prefer the header/section/div that contains the anchor as the visual start
-        if start_tag.name in ['h1', 'h2', 'h3', 'h4', 'section', 'div', 'article']:
-            start_node = start_tag
-        else:
-            start_node = start_tag
+        start_node = start_tag
 
     # Determine the next stop tag (first that appears after start)
     stop_tag_candidates = []
@@ -117,7 +113,7 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], sto
         return pos_a >= 0 and pos_b > pos_a
 
     # Pick the earliest stop tag that comes after start
-    stop_tag: Optional[Any] = None
+    stop_tag: Any | None = None
     if start_node is None:
         # From beginning, choose the first anchor in doc order
         earliest = None
@@ -127,12 +123,11 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], sto
         stop_tag = earliest
     else:
         for cand in stop_tag_candidates:
-            if comes_before(start_node, cand):
-                if stop_tag is None or comes_before(cand, stop_tag):
-                    stop_tag = cand
+            if comes_before(start_node, cand) and (stop_tag is None or comes_before(cand, stop_tag)):
+                stop_tag = cand
 
     # Top-level body children that contain (as a descendant, not themselves) any of `tags`
-    def containing_children(tags: List[Tag]) -> set:
+    def containing_children(tags: list[Tag]) -> set:
         result = set()
         for t in tags:
             node = t.parent
@@ -150,21 +145,19 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], sto
         stop_containers = containing_children([stop_tag] + (index.all_with_id(stop_id) if stop_id else []))
 
     # Collect HTML between start and stop
-    html_parts: List[str] = []
-    collecting = False if start_node is not None else True
+    html_parts: list[str] = []
+    collecting = start_node is None
 
     for child in body.children:
         # We operate at the top level of body to avoid deep nested slicing issues
-        if not collecting and start_node is not None:
-            # Start when we reach start_node or it is contained within this child
-            if child == start_node or id(child) in start_containers:
-                collecting = True
+        # Start when we reach start_node or it is contained within this child
+        if not collecting and (child == start_node or id(child) in start_containers):
+            collecting = True
 
         if collecting:
             # Stop before stop_tag if it's this child or contained
-            if stop_tag is not None:
-                if child == stop_tag or id(child) in stop_containers:
-                    break
+            if stop_tag is not None and (child == stop_tag or id(child) in stop_containers):
+                break
             html_parts.append(str(child))
 
         # If starting at beginning, start collecting immediately

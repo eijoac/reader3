@@ -4,7 +4,6 @@ import logging
 import os
 import shutil
 import sys
-from typing import List
 
 from .convert import convert_epub
 from .models import Book
@@ -21,7 +20,7 @@ USAGE = """Usage:
   reader3.py remove <name>        delete a converted book (the .epub is kept)"""
 
 
-def _book_names(library_dir: str) -> List[str]:
+def _book_names(library_dir: str) -> list[str]:
     if not os.path.isdir(library_dir):
         return []
     return sorted(
@@ -73,7 +72,7 @@ def _cmd_list(library_dir: str) -> int:
     return 0
 
 
-def _cmd_reprocess(args: List[str], library_dir: str) -> int:
+def _cmd_reprocess(args: list[str], library_dir: str) -> int:
     if len(args) != 1:
         print(USAGE, file=sys.stderr)
         return 1
@@ -94,7 +93,7 @@ def _cmd_reprocess(args: List[str], library_dir: str) -> int:
     return 1 if failed else 0
 
 
-def _cmd_remove(args: List[str], library_dir: str) -> int:
+def _cmd_remove(args: list[str], library_dir: str) -> int:
     if len(args) != 1:
         print(USAGE, file=sys.stderr)
         return 1
@@ -112,7 +111,7 @@ def _cmd_remove(args: List[str], library_dir: str) -> int:
     return 0
 
 
-def main(argv: List[str], library_dir: str = LIBRARY_DIR) -> int:
+def main(argv: list[str], library_dir: str = LIBRARY_DIR) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = argv[1:]
     if not args:

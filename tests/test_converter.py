@@ -1,12 +1,12 @@
-import shutil
 import re
+import shutil
 from pathlib import Path
 
 import pytest
+from conftest import build_epub, load_json
 from ebooklib import epub
 
 from converter import cli, convert, images, storage, toc
-from conftest import build_epub, load_json
 
 
 def test_spine_order_and_toc_splits(converted):
@@ -93,7 +93,7 @@ def test_failed_conversion_keeps_previous_output(tmp_path, epub_path):
 
     broken = tmp_path / "broken.epub"
     broken.write_text("not a zip")
-    with pytest.raises(Exception):
+    with pytest.raises(epub.EpubException):
         convert.convert_epub(str(broken), str(out))
 
     assert (out / "book.json").read_bytes() == before

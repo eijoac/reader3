@@ -101,8 +101,10 @@ def converted(tmp_path_factory, epub_path):
 def library(tmp_path, converted, monkeypatch):
     """A library dir holding one converted book, wired into the server module."""
     import shutil
-    import server
+
     from fastapi.templating import Jinja2Templates
+
+    import server
 
     _, out = converted
     shutil.copytree(out, tmp_path / "Test_data")
@@ -116,6 +118,7 @@ def library(tmp_path, converted, monkeypatch):
 @pytest.fixture
 def client(library):
     from fastapi.testclient import TestClient
+
     import server
     return TestClient(server.app)
 

@@ -1,6 +1,5 @@
 """Table of contents parsing."""
 
-from typing import List, Optional
 
 import ebooklib
 from ebooklib import epub
@@ -8,12 +7,12 @@ from ebooklib import epub
 from .models import TOCEntry
 
 
-def _make_toc_entry(title: str, href: str, children: Optional[List[TOCEntry]] = None) -> TOCEntry:
+def _make_toc_entry(title: str, href: str, children: list[TOCEntry] | None = None) -> TOCEntry:
     file_href, _, anchor = href.partition('#')
     return TOCEntry(title=title, href=href, file_href=file_href, anchor=anchor, children=children or [])
 
 
-def parse_toc_recursive(toc_list) -> List[TOCEntry]:
+def parse_toc_recursive(toc_list) -> list[TOCEntry]:
     """
     Recursively parses the TOC structure from ebooklib.
     """
@@ -30,7 +29,7 @@ def parse_toc_recursive(toc_list) -> List[TOCEntry]:
     return result
 
 
-def get_fallback_toc(book_obj) -> List[TOCEntry]:
+def get_fallback_toc(book_obj) -> list[TOCEntry]:
     """
     If TOC is missing, build a flat one from the Spine, in reading order.
     """
@@ -47,8 +46,8 @@ def get_fallback_toc(book_obj) -> List[TOCEntry]:
 
 
 
-def _flatten_toc(entries: List[TOCEntry]) -> List[TOCEntry]:
-    flat: List[TOCEntry] = []
+def _flatten_toc(entries: list[TOCEntry]) -> list[TOCEntry]:
+    flat: list[TOCEntry] = []
     for e in entries:
         flat.append(e)
         if e.children:

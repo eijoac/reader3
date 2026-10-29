@@ -2,14 +2,13 @@ import logging
 import os
 import posixpath
 import re
-from pathlib import Path
 from dataclasses import replace
 from functools import lru_cache
-from typing import Dict, List, Optional
+from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -83,7 +82,7 @@ def _raise_if_outdated(book_id: str):
 
 
 @lru_cache(maxsize=16)
-def _load_book(folder_name: str, mtime_ns: int) -> Optional[Book]:
+def _load_book(folder_name: str, mtime_ns: int) -> Book | None:
     # mtime_ns is unused in the body; it is part of the cache key so a reprocessed book is reloaded
     try:
         return load_book_file(os.path.join(BOOKS_DIR, folder_name))
@@ -92,7 +91,7 @@ def _load_book(folder_name: str, mtime_ns: int) -> Optional[Book]:
         return None
 
 
-def load_book_cached(folder_name: str) -> Optional[Book]:
+def load_book_cached(folder_name: str) -> Book | None:
     """
     Loads the book from book.json.
     Cached so we don't re-read the disk on every click, but the cache is
@@ -108,20 +107,20 @@ def load_book_cached(folder_name: str) -> Optional[Book]:
     return _load_book(folder_name, mtime_ns)
 
 
-def _toc_index_map(book: Book) -> Dict[str, int]:
+def _toc_index_map(book: Book) -> dict[str, int]:
     """
     Maps every TOC href to the index of the chapter it opens: the exact chapter
     (file#anchor) if there is one, otherwise the first chapter of that file.
     """
-    exact: Dict[str, int] = {}
-    first_in_file: Dict[str, int] = {}
+    exact: dict[str, int] = {}
+    first_in_file: dict[str, int] = {}
     for idx, chapter in enumerate(book.spine):
         exact.setdefault(chapter.href, idx)
         first_in_file.setdefault(chapter.href.split('#')[0], idx)
 
-    result: Dict[str, int] = {}
+    result: dict[str, int] = {}
 
-    def walk(entries: List[TOCEntry]):
+    def walk(entries: list[TOCEntry]):
         for entry in entries:
             idx = exact.get(entry.href, first_in_file.get(entry.file_href))
             if idx is not None:
@@ -182,7 +181,7 @@ def redirect_to_first_chapter(book_id: str):
     return RedirectResponse(f"/read/{quote(book_id, safe='')}/0")
 
 
-def _resolve_chapter(book: Book, ref: str) -> Optional[int]:
+def _resolve_chapter(book: Book, ref: str) -> int | None:
     """
     Maps a URL reference to a spine index. Accepts a numeric index, or an exact
     chapter href / id / file name (the first chapter of that file). Returns None if

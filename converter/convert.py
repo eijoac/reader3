@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
 from urllib.parse import unquote
 
 import ebooklib
@@ -28,9 +27,9 @@ INTERNAL_LINK_MARK = "__INTERNAL_LINK__"
 INTERNAL_LINK_RE = re.compile(r'href=(["\'])' + INTERNAL_LINK_MARK + r'(.*?)\1', re.DOTALL)
 
 
-def _load_documents(book: epub.EpubBook, image_map: Dict[str, str]) -> Dict[str, BeautifulSoup]:
+def _load_documents(book: epub.EpubBook, image_map: dict[str, str]) -> dict[str, BeautifulSoup]:
     """Parses every document once: sanitised, with image sources and internal links rewritten."""
-    soups: Dict[str, BeautifulSoup] = {}
+    soups: dict[str, BeautifulSoup] = {}
     for item in book.get_items():
         if item.get_type() != ebooklib.ITEM_DOCUMENT:
             continue
@@ -59,9 +58,9 @@ def _mark_internal_links(soup: BeautifulSoup) -> None:
         link['href'] = f"{INTERNAL_LINK_MARK}{href_decoded}"
 
 
-def _reading_order(book: epub.EpubBook, flat_toc: List[TOCEntry], soups: Dict[str, BeautifulSoup]) -> List[str]:
+def _reading_order(book: epub.EpubBook, flat_toc: list[TOCEntry], soups: dict[str, BeautifulSoup]) -> list[str]:
     """Document names in reading order. The spine decides; the TOC only supplies titles and split points."""
-    files: List[str] = []
+    files: list[str] = []
     for spine_entry in book.spine:
         idref = spine_entry[0] if isinstance(spine_entry, (tuple, list)) else spine_entry
         spine_item = book.get_item_with_id(idref)
@@ -74,40 +73,40 @@ def _reading_order(book: epub.EpubBook, flat_toc: List[TOCEntry], soups: Dict[st
     return files
 
 
-def _document_anchors(soup: BeautifulSoup) -> List[str]:
+def _document_anchors(soup: BeautifulSoup) -> list[str]:
     anchors = [tag['id'] for tag in soup.find_all(id=True)]
     anchors += [tag['name'] for tag in soup.find_all(attrs={"name": True})]
     return anchors
 
 
 def _build_chapters(
-    files: List[str],
-    soups: Dict[str, BeautifulSoup],
-    anchor_indexes: Dict[str, _AnchorIndex],
-    flat_toc: List[TOCEntry],
-) -> Tuple[List[ChapterContent], Dict[str, int]]:
+    files: list[str],
+    soups: dict[str, BeautifulSoup],
+    anchor_indexes: dict[str, _AnchorIndex],
+    flat_toc: list[TOCEntry],
+) -> tuple[list[ChapterContent], dict[str, int]]:
     """
     Generates chapters in reading order; within a file, splits at TOC anchors in document order.
     Also returns the link map {href -> chapter index} for everything that opens a chapter directly.
     """
-    toc_entries_by_file: Dict[str, List[TOCEntry]] = {}
+    toc_entries_by_file: dict[str, list[TOCEntry]] = {}
     for entry in flat_toc:
         toc_entries_by_file.setdefault(entry.file_href, []).append(entry)
 
-    chapters: List[ChapterContent] = []
-    href_to_index: Dict[str, int] = {}
+    chapters: list[ChapterContent] = []
+    href_to_index: dict[str, int] = {}
 
     for file_href in files:
         soup = soups[file_href]
         index = anchor_indexes[file_href]
 
-        def anchor_position(anchor: Optional[str]) -> int:
+        def anchor_position(anchor: str | None, index: _AnchorIndex = index) -> int:
             if anchor is None:
                 return -1
             return index.position(index.find(anchor))
 
         # (anchor, title) pairs; anchors missing from the file are treated as the file start
-        starts: List[Tuple[Optional[str], str]] = []
+        starts: list[tuple[str | None, str]] = []
         seen_anchors = set()
         for entry in toc_entries_by_file.get(file_href, []):
             anchor = entry.anchor if entry.anchor and index.find(entry.anchor) else None
@@ -160,13 +159,13 @@ def _build_chapters(
 
 
 def _map_other_anchors(
-    chapters: List[ChapterContent],
-    soups: Dict[str, BeautifulSoup],
-    anchor_indexes: Dict[str, _AnchorIndex],
-    href_to_index: Dict[str, int],
+    chapters: list[ChapterContent],
+    soups: dict[str, BeautifulSoup],
+    anchor_indexes: dict[str, _AnchorIndex],
+    href_to_index: dict[str, int],
 ) -> None:
     """Links to anchors that don't start a chapter resolve to the chapter whose slice contains them."""
-    chapters_by_file: Dict[str, List[Tuple[Optional[str], int]]] = {}
+    chapters_by_file: dict[str, list[tuple[str | None, int]]] = {}
     for i, ch in enumerate(chapters):
         ch_file, _, ch_anchor = ch.href.partition('#')
         chapters_by_file.setdefault(ch_file, []).append((ch_anchor or None, i))
@@ -175,7 +174,7 @@ def _map_other_anchors(
         index = anchor_indexes[file_name]
 
         # Chapter starts of this file, with their DOM positions, in document order
-        start_tags: List[Tuple[Optional[str], int, Optional[Tag], int]] = []  # (anchor, idx, tag, pos)
+        start_tags: list[tuple[str | None, int, Tag | None, int]] = []  # (anchor, idx, tag, pos)
         for anchor_id, idx in chapters_by_file.get(file_name, []):
             if anchor_id is None:
                 start_tags.append((None, idx, None, 0))
@@ -191,7 +190,7 @@ def _map_other_anchors(
             chosen_idx = None
             a_pos = index.body_position(a_tag)
             # Exact match to a chapter start first
-            for s_anchor, idx, s_tag, s_pos in start_tags:
+            for s_anchor, idx, s_tag, _ in start_tags:
                 if s_tag is not None and s_anchor == anchor_id:
                     chosen_idx = idx
                     break
@@ -217,7 +216,7 @@ def _map_other_anchors(
                 href_to_index[os.path.basename(file_name) + '#' + anchor_id] = chosen_idx
 
 
-def _rewrite_internal_links(chapters: List[ChapterContent], href_to_index: Dict[str, int]) -> None:
+def _rewrite_internal_links(chapters: list[ChapterContent], href_to_index: dict[str, int]) -> None:
     """Replaces the internal-link markers with __CHAPTER__<index>[#fragment] placeholders (one pass per chapter)."""
 
     def rewrite_link(m: re.Match) -> str:
