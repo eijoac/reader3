@@ -2,11 +2,13 @@
 Parses an EPUB file into a structured object that can be used to serve the book via a web interface.
 """
 
+import logging
 import os
 import pickle
 import posixpath
 import re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
@@ -16,6 +18,8 @@ import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup, Comment
 from bs4.element import Tag
+
+log = logging.getLogger(__name__)
 
 # --- Data structures ---
 
@@ -136,56 +140,41 @@ def extract_plain_text(soup: BeautifulSoup) -> str:
     return ' '.join(text.split())
 
 
-def parse_toc_recursive(toc_list, depth=0) -> List[TOCEntry]:
+def _make_toc_entry(title: str, href: str, children: Optional[List[TOCEntry]] = None) -> TOCEntry:
+    file_href, _, anchor = href.partition('#')
+    return TOCEntry(title=title, href=href, file_href=file_href, anchor=anchor, children=children or [])
+
+
+def parse_toc_recursive(toc_list) -> List[TOCEntry]:
     """
     Recursively parses the TOC structure from ebooklib.
     """
     result = []
 
     for item in toc_list:
-        # ebooklib TOC items are either `Link` objects or tuples (Section, [Children])
+        # ebooklib TOC items are either `Link`/`Section` objects or tuples (Section, [Children])
         if isinstance(item, tuple):
             section, children = item
-            entry = TOCEntry(
-                title=section.title,
-                href=section.href,
-                file_href=section.href.split('#')[0],
-                anchor=section.href.split('#')[1] if '#' in section.href else "",
-                children=parse_toc_recursive(children, depth + 1)
-            )
-            result.append(entry)
-        elif isinstance(item, epub.Link):
-            entry = TOCEntry(
-                title=item.title,
-                href=item.href,
-                file_href=item.href.split('#')[0],
-                anchor=item.href.split('#')[1] if '#' in item.href else ""
-            )
-            result.append(entry)
-        # Note: ebooklib sometimes returns direct Section objects without children
-        elif isinstance(item, epub.Section):
-             entry = TOCEntry(
-                title=item.title,
-                href=item.href,
-                file_href=item.href.split('#')[0],
-                anchor=item.href.split('#')[1] if '#' in item.href else ""
-            )
-             result.append(entry)
+            result.append(_make_toc_entry(section.title, section.href, parse_toc_recursive(children)))
+        elif isinstance(item, (epub.Link, epub.Section)):
+            result.append(_make_toc_entry(item.title, item.href))
 
     return result
 
 
 def get_fallback_toc(book_obj) -> List[TOCEntry]:
     """
-    If TOC is missing, build a flat one from the Spine.
+    If TOC is missing, build a flat one from the Spine, in reading order.
     """
     toc = []
-    for item in book_obj.get_items():
-        if item.get_type() == ebooklib.ITEM_DOCUMENT:
-            name = item.get_name()
-            # Try to guess a title from the content or ID
-            title = item.get_name().replace('.html', '').replace('.xhtml', '').replace('_', ' ').title()
-            toc.append(TOCEntry(title=title, href=name, file_href=name, anchor=""))
+    for spine_entry in book_obj.spine:
+        idref = spine_entry[0] if isinstance(spine_entry, (tuple, list)) else spine_entry
+        item = book_obj.get_item_with_id(idref)
+        if item is None or item.get_type() != ebooklib.ITEM_DOCUMENT:
+            continue
+        name = item.get_name()
+        title = name.replace('.html', '').replace('.xhtml', '').replace('_', ' ').title()
+        toc.append(_make_toc_entry(title, name))
     return toc
 
 
@@ -230,7 +219,7 @@ def extract_cover_image(book_obj, images_dir: str, used_names: set) -> Optional[
         if cover_item:
             return _save_cover(cover_item, images_dir, used_names)
     except Exception as e:
-        print(f"Method 1 (ITEM_COVER) failed: {e}")
+        log.warning("Cover lookup via ITEM_COVER failed: %s", e)
     
     # Method 2: Check metadata for cover reference
     try:
@@ -242,7 +231,7 @@ def extract_cover_image(book_obj, images_dir: str, used_names: set) -> Optional[
                     if item.get_id() == cover_id or item.get_name().endswith(cover_id):
                         return _save_cover(item, images_dir, used_names)
     except Exception as e:
-        print(f"Method 2 (metadata cover) failed: {e}")
+        log.warning("Cover lookup via metadata failed: %s", e)
     
     # Method 3: Look for common cover image names
     cover_patterns = ['cover', 'Cover', 'COVER', 'front']
@@ -255,7 +244,7 @@ def extract_cover_image(book_obj, images_dir: str, used_names: set) -> Optional[
     # Method 4: Get the first image as a fallback
     for item in book_obj.get_items():
         if item.get_type() == ebooklib.ITEM_IMAGE:
-            print("Warning: Using first image as cover (no explicit cover found)")
+            log.warning("Using first image as cover (no explicit cover found)")
             return _save_cover(item, images_dir, used_names)
     
     return None
@@ -344,18 +333,6 @@ class _AnchorIndex:
             self._body_positions = {id(el): i for i, el in enumerate(body.descendants, start=1)}
             self._body_positions[-1] = len(self._body_positions) + 1
         return self._body_positions.get(id(tag), self._body_positions[-1])
-
-
-def _find_anchor_tag(soup: BeautifulSoup, anchor: str, index: Optional[_AnchorIndex] = None):
-    if not anchor:
-        return None
-    if index is not None:
-        return index.find(anchor)
-    tag = soup.find(id=anchor)
-    if tag:
-        return tag
-    # Fallback for name="..."
-    return soup.find(attrs={"name": anchor})
 
 
 def _fallback_title(soup: BeautifulSoup, file_href: str) -> str:
@@ -481,7 +458,7 @@ def _slice_html_by_anchors(soup: BeautifulSoup, start_anchor: Optional[str], sto
 def process_epub(epub_path: str, output_dir: str) -> Book:
 
     # 1. Load Book
-    print(f"Loading {epub_path}...")
+    log.info("Loading %s...", epub_path)
     book = epub.read_epub(epub_path)
 
     # 2. Extract Metadata
@@ -492,19 +469,19 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
     os.makedirs(images_dir, exist_ok=True)
 
     # 4. Extract Cover Image First
-    print("Extracting cover image...")
+    log.info("Extracting cover image...")
     image_map = {} # Key: internal_path, Value: local_relative_path
     used_image_names: set = set()
     basename_targets: Dict[str, List[str]] = {}
     cover_path = extract_cover_image(book, images_dir, used_image_names)
     if cover_path:
         metadata.cover_image = cover_path
-        print(f"Cover extracted: {cover_path}")
+        log.info("Cover extracted: %s", cover_path)
     else:
-        print("Warning: No cover image found")
+        log.warning("No cover image found")
 
     # 5. Extract Images & Build Map
-    print("Extracting other images...")
+    log.info("Extracting other images...")
 
     for item in book.get_items():
         if item.get_type() in (ebooklib.ITEM_IMAGE, ebooklib.ITEM_COVER):
@@ -524,24 +501,22 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
             image_map.setdefault(basename, targets[0])
 
     # 6. Process TOC
-    print("Parsing Table of Contents...")
+    log.info("Parsing Table of Contents...")
     toc_structure = parse_toc_recursive(book.toc)
     if not toc_structure:
-        print("Warning: Empty TOC, building fallback from Spine...")
+        log.warning("Empty TOC, building fallback from Spine...")
         toc_structure = get_fallback_toc(book)
     flat_toc = _flatten_toc(toc_structure)
 
     # 7. Process Content based on TOC (split by anchors for one-chapter-at-a-time)
-    print("Processing chapters...")
+    log.info("Processing chapters...")
     spine_chapters: List[ChapterContent] = []
 
     # Pre-parse all document files once
-    doc_items: Dict[str, Any] = {}
     soups: Dict[str, BeautifulSoup] = {}
     for item in book.get_items():
         if item.get_type() == ebooklib.ITEM_DOCUMENT:
             name = item.get_name()
-            doc_items[name] = item
             raw_content = item.get_content().decode('utf-8', errors='ignore')
             soup = BeautifulSoup(raw_content, 'html.parser')
 
@@ -734,7 +709,7 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
                 href_to_index[os.path.basename(file_name) + '#' + anchor_id] = chosen_idx
 
     # Now rewrite all internal links in the chapters to use indices
-    print("Rewriting internal links...")
+    log.info("Rewriting internal links...")
     link_pattern = re.compile(r'href=(["\'])__INTERNAL_LINK__(.*?)\1', re.DOTALL)
 
     def rewrite_link(m: re.Match) -> str:
@@ -772,7 +747,7 @@ def save_to_pickle(book: Book, output_dir: str):
     p_path = os.path.join(output_dir, 'book.pkl')
     with open(p_path, 'wb') as f:
         pickle.dump(book, f)
-    print(f"Saved structured data to {p_path}")
+    log.info("Saved structured data to %s", p_path)
 
 
 def convert_epub(epub_path: str, output_dir: str) -> Book:
@@ -815,19 +790,28 @@ def convert_epub(epub_path: str, output_dir: str) -> Book:
 
 # --- CLI ---
 
-if __name__ == "__main__":
+def main(argv: List[str]) -> int:
+    if len(argv) < 2:
+        print("Usage: python reader3.py <file.epub>", file=sys.stderr)
+        return 1
 
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python reader3.py <file.epub>")
-        sys.exit(1)
+    epub_file = argv[1]
+    if not os.path.isfile(epub_file):
+        print(f"Error: file not found: {epub_file}", file=sys.stderr)
+        return 1
 
-    epub_file = sys.argv[1]
-    assert os.path.exists(epub_file), "File not found."
     book_name = os.path.splitext(os.path.basename(epub_file))[0]
     out_dir = os.path.join("library", f"{book_name}_data")
 
-    book_obj = convert_epub(epub_file, out_dir)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    try:
+        book_obj = convert_epub(epub_file, out_dir)
+    except Exception as e:
+        log.debug("Conversion failed", exc_info=True)
+        print(f"Error: could not convert {epub_file}: {e}", file=sys.stderr)
+        print("Any previously converted copy of this book was left untouched.", file=sys.stderr)
+        return 1
+
     print("\n--- Summary ---")
     print(f"Title: {book_obj.metadata.title}")
     print(f"Authors: {', '.join(book_obj.metadata.authors)}")
@@ -835,3 +819,8 @@ if __name__ == "__main__":
     print(f"TOC Root Items: {len(book_obj.toc)}")
     print(f"Cover Image Extracted: {'Yes' if book_obj.metadata.cover_image else 'No'}")
     print(f"Other Images extracted: {len(book_obj.images)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
