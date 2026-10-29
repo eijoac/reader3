@@ -22,6 +22,12 @@ uv run server.py
 
 And visit [localhost:8123](http://localhost:8123/) to see your current Library. You can easily add more books, or delete them from your library by deleting the folder. It's not supposed to be complicated or complex.
 
+### Reading
+
+- Your place in each book is remembered (in the browser) and the library offers "Continue" for books you've started.
+- Keyboard: `←` / `→` previous / next section, `t` show/hide the contents, `d` toggle dark mode.
+- Dark mode follows your system setting until you pick one with the toggle.
+
 ## Tests
 
 ```bash

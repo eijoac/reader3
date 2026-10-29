@@ -111,6 +111,25 @@ def test_pickle_written_as_main_module_still_loads(library, monkeypatch):
     assert server.load_book_cached("Main_data").metadata.title == "Test Book"
 
 
+def test_reader_has_theme_keyboard_and_position_hooks(client):
+    html = client.get("/read/Test_data/2").text
+    assert 'id="theme-toggle"' in html
+    assert 'const PREV_URL = "/read/Test_data/1"' in html
+    assert 'const NEXT_URL = "/read/Test_data/3"' in html
+    assert 'const BOOK_ID = "Test_data"' in html
+
+
+def test_reader_keyboard_urls_are_null_at_the_ends(client, converted):
+    book, _ = converted
+    assert "const PREV_URL = null" in client.get("/read/Test_data/0").text
+    assert "const NEXT_URL = null" in client.get(f"/read/Test_data/{len(book.spine) - 1}").text
+
+
+def test_library_button_carries_data_for_resume(client):
+    html = client.get("/").text
+    assert 'data-book-id="Test_data"' in html and 'data-chapters="' in html
+
+
 def test_cache_reloads_when_book_is_reprocessed(library):
     first = server.load_book_cached("Test_data")
     assert server.load_book_cached("Test_data") is first
