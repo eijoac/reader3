@@ -4,6 +4,8 @@ import logging
 import os
 import shutil
 import sys
+import tomllib
+from pathlib import Path
 
 from .convert import convert_epub
 from .models import Book
@@ -14,10 +16,13 @@ log = logging.getLogger(__name__)
 
 LIBRARY_DIR = "library"
 USAGE = """Usage:
-  reader3.py <file.epub>          convert a book into the library
+  reader3.py <name.epub>          convert library/<name.epub> (the file must be in library/)
   reader3.py list                 list converted books
   reader3.py reprocess <name>|--all   re-convert from library/<name>.epub
-  reader3.py remove <name>        delete a converted book (the .epub is kept)"""
+  reader3.py remove <name>        delete a converted book (the .epub is kept)
+  reader3.py --version            show the version
+
+Books are converted to library/<name>_data."""
 
 
 def _book_names(library_dir: str) -> list[str]:
@@ -112,6 +117,23 @@ def _cmd_remove(args: list[str], library_dir: str) -> int:
     return 0
 
 
+def _find_in_library(arg: str, library_dir: str) -> str | None:
+    """Accepts `name.epub` or `library/name.epub`; the file must sit directly in the library folder."""
+    for candidate in (arg, os.path.join(library_dir, arg)):
+        if os.path.isfile(candidate) and os.path.samefile(os.path.dirname(os.path.abspath(candidate)), library_dir):
+            return candidate
+    return None
+
+
+def _version() -> str:
+    """Read from pyproject.toml (this is run as a plain script, so the project is not installed)."""
+    try:
+        with open(Path(__file__).resolve().parent.parent / "pyproject.toml", "rb") as f:
+            return tomllib.load(f)["project"]["version"]
+    except OSError, KeyError, tomllib.TOMLDecodeError:
+        return "unknown"
+
+
 def main(argv: list[str], library_dir: str = LIBRARY_DIR) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = argv[1:]
@@ -119,6 +141,15 @@ def main(argv: list[str], library_dir: str = LIBRARY_DIR) -> int:
         print(USAGE, file=sys.stderr)
         return 1
     command, rest = args[0], args[1:]
+    if command in ("-h", "--help", "help"):
+        print(USAGE)
+        return 0
+    if command in ("-V", "--version"):
+        print(f"reader3 {_version()}")
+        return 0
+    if command.startswith("-"):
+        print(f"Error: unknown option: {command}\n\n{USAGE}", file=sys.stderr)
+        return 1
     if command == "list":
         return _cmd_list(library_dir)
     if command == "reprocess":
@@ -126,7 +157,8 @@ def main(argv: list[str], library_dir: str = LIBRARY_DIR) -> int:
     if command == "remove":
         return _cmd_remove(rest, library_dir)
 
-    if not os.path.isfile(command):
-        print(f"Error: file not found: {command}", file=sys.stderr)
+    epub = _find_in_library(command, library_dir)
+    if epub is None:
+        print(f"Error: {command} not found. Put the .epub in {library_dir}/ first.", file=sys.stderr)
         return 1
-    return 0 if _convert_cli(command, library_dir) else 1
+    return 0 if _convert_cli(epub, library_dir) else 1

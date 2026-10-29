@@ -119,7 +119,8 @@ def test_cli_errors(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     assert cli.main(["reader3.py"]) == 1
     assert cli.main(["reader3.py", "missing.epub"]) == 1
-    (tmp_path / "bad.epub").write_text("nope")
+    Path("library").mkdir()
+    Path("library/bad.epub").write_text("nope")
     assert cli.main(["reader3.py", "bad.epub"]) == 1
     assert "Error" in capsys.readouterr().err
     assert not Path("library/bad_data").exists()
@@ -227,3 +228,26 @@ def test_fallback_toc_titles_use_first_heading(tmp_path):
 def test_missing_language_stays_empty(tmp_path):
     path = _write_simple_epub(tmp_path / "nolang.epub", {"c.xhtml": "<p>hi</p>"}, language=None)
     assert convert.convert_epub(str(path), str(tmp_path / "o_data")).metadata.language == ""
+
+
+def test_cli_help_and_version(capsys):
+    assert cli.main(["reader3.py", "--help"]) == 0
+    assert "reprocess" in capsys.readouterr().out
+    assert cli.main(["reader3.py", "--version"]) == 0
+    assert capsys.readouterr().out.strip() == "reader3 0.1.0"
+    assert cli.main(["reader3.py", "--bogus"]) == 1
+    assert "unknown option" in capsys.readouterr().err
+
+
+def test_cli_converts_only_epubs_inside_the_library(tmp_path, epub_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    lib = tmp_path / "library"
+    lib.mkdir()
+    shutil.copy(epub_path, tmp_path / "outside.epub")
+    shutil.copy(epub_path, lib / "inside.epub")
+    assert cli.main(["reader3.py", "outside.epub"]) == 1
+    assert "library/" in capsys.readouterr().err
+    assert cli.main(["reader3.py", "library/outside.epub"]) == 1
+    assert cli.main(["reader3.py", "inside.epub"]) == 0
+    assert (lib / "inside_data" / "book.json").exists()
+    assert cli.main(["reader3.py", "library/inside.epub"]) == 0

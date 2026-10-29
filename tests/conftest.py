@@ -100,15 +100,16 @@ def library(tmp_path, converted, monkeypatch):
     """A library dir holding one converted book, wired into the server module."""
     import shutil
 
+    import library as libmod
     import server
 
     _, out = converted
     shutil.copytree(out, tmp_path / "Test_data")
-    monkeypatch.setattr(server, "BOOKS_DIR", str(tmp_path))
+    monkeypatch.setattr(libmod, "BOOKS_DIR", str(tmp_path))
     monkeypatch.setattr(server, "templates", server.make_templates(ROOT / "templates"))
-    server._load_book.cache_clear()
+    libmod._load_book.cache_clear()
     yield tmp_path
-    server._load_book.cache_clear()
+    libmod._load_book.cache_clear()
 
 
 @pytest.fixture

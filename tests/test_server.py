@@ -4,6 +4,7 @@ import re
 
 import pytest
 
+import library as libmod
 import server
 from converter import storage
 
@@ -90,10 +91,10 @@ def test_folder_without_data_suffix_is_not_served(client, library):
 
 
 def test_is_valid_book_id():
-    assert server._is_valid_book_id("Book_data")
-    assert server._is_valid_book_id("My Book #1_data")
+    assert libmod.is_valid_book_id("Book_data")
+    assert libmod.is_valid_book_id("My Book #1_data")
     for bad in ("", "Book", "../x_data", "a/b_data", "a\\b_data", "x\x00_data", ".."):
-        assert not server._is_valid_book_id(bad)
+        assert not libmod.is_valid_book_id(bad)
 
 
 def test_corrupt_book_is_skipped(client, library):
@@ -129,7 +130,7 @@ def test_library_page_does_not_load_books(client, monkeypatch):
     def boom(*a, **k):
         raise AssertionError("library page must only read meta.json")
 
-    monkeypatch.setattr(server, "load_book_file", boom)
+    monkeypatch.setattr(libmod, "load_book_file", boom)
     r = client.get("/")
     assert "Test Book" in r.text
     assert client.get("/cover/Test_data").status_code == 200
@@ -232,8 +233,8 @@ def test_library_button_carries_data_for_resume(client):
 
 
 def test_cache_reloads_when_book_is_reprocessed(library):
-    first = server.load_book_cached("Test_data")
-    assert server.load_book_cached("Test_data") is first
+    first = libmod.load_book_cached("Test_data")
+    assert libmod.load_book_cached("Test_data") is first
 
     path = library / "Test_data" / "book.json"
     data = json.loads(path.read_text())
@@ -241,24 +242,24 @@ def test_cache_reloads_when_book_is_reprocessed(library):
     path.write_text(json.dumps(data))
     st = path.stat()
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
-    assert server.load_book_cached("Test_data").metadata.title == "Changed Title"
+    assert libmod.load_book_cached("Test_data").metadata.title == "Changed Title"
 
 
 def test_toc_index_is_computed_once_per_book_version(library, monkeypatch):
     calls = []
-    real = server._toc_index_map
-    monkeypatch.setattr(server, "_toc_index_map", lambda book: calls.append(1) or real(book))
-    server._load_book.cache_clear()
-    first = server.load_loaded_book("Test_data")
+    real = libmod.toc_index_map
+    monkeypatch.setattr(libmod, "toc_index_map", lambda book: calls.append(1) or real(book))
+    libmod._load_book.cache_clear()
+    first = libmod.load_loaded_book("Test_data")
     for _ in range(3):
-        assert server.load_loaded_book("Test_data") is first
+        assert libmod.load_loaded_book("Test_data") is first
     assert first.toc_index and len(calls) == 1
 
     path = library / "Test_data" / "book.json"
     path.write_text(path.read_text())
     st = path.stat()
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
-    server.load_loaded_book("Test_data")
+    libmod.load_loaded_book("Test_data")
     assert len(calls) == 2  # recomputed after the book was reprocessed
 
 
@@ -268,7 +269,7 @@ def test_reader_does_not_rebuild_toc_map_per_request(client, monkeypatch):
     def boom(book):
         raise AssertionError("toc map must come from the cache")
 
-    monkeypatch.setattr(server, "_toc_index_map", boom)
+    monkeypatch.setattr(libmod, "toc_index_map", boom)
     assert client.get("/read/Test_data/1").status_code == 200
 
 
@@ -302,3 +303,14 @@ def test_static_version_changes_with_the_file(tmp_path, monkeypatch):
     first = server.static_url("a.js")
     os.utime(f, ns=(1, 2_000_000_000))
     assert server.static_url("a.js") != first
+
+
+def test_library_module_does_not_depend_on_the_web_layer():
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(libmod))
+    imported = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | {
+        a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names
+    }
+    assert not any(m and m.split(".")[0] in ("fastapi", "starlette", "server") for m in imported)

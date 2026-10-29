@@ -1,9 +1,7 @@
-import logging
 import os
 import posixpath
 import re
-from dataclasses import dataclass, replace
-from functools import lru_cache
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import quote
 
@@ -12,10 +10,9 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from converter.models import Book, TOCEntry
-from converter.storage import BOOK_FILE, is_legacy_book, load_book_file, read_summary
-
-log = logging.getLogger("uvicorn.error")  # shares uvicorn's handlers, so messages show up in the console
+import library
+from converter.models import Book
+from converter.storage import read_summary
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -63,35 +60,20 @@ def make_templates(directory) -> Jinja2Templates:
 
 templates = make_templates(BASE_DIR / "templates")
 
-# Where are the book folders located?
-BOOKS_DIR = "library"
-
 # Placeholder written by reader3.py: __CHAPTER__<spine index>[#fragment]
 CHAPTER_LINK_RE = re.compile(r'href=["\']__CHAPTER__([0-9]+)(#[^"\']*)?["\']')
 
 
-def _is_valid_book_id(book_id: str) -> bool:
-    """A book id is the name of a processed folder: a plain `*_data` name, never a path."""
-    return (
-        book_id.endswith("_data")
-        and book_id == os.path.basename(book_id)
-        and "\\" not in book_id
-        and "\x00" not in book_id
-    )
-
-
 def _book_dir(book_id: str) -> str:
     """Resolves a book id to its folder, or raises 404. Every route goes through this."""
-    if not _is_valid_book_id(book_id):
-        raise HTTPException(status_code=404, detail="Book not found")
-    path = os.path.join(BOOKS_DIR, book_id)
-    if not os.path.isdir(path):
+    path = library.book_dir(book_id)
+    if path is None:
         raise HTTPException(status_code=404, detail="Book not found")
     return path
 
 
 def _raise_if_outdated(book_id: str):
-    if is_legacy_book(os.path.join(BOOKS_DIR, book_id)):
+    if library.is_outdated(book_id):
         name = book_id[: -len("_data")]
         raise HTTPException(
             status_code=409,
@@ -99,106 +81,10 @@ def _raise_if_outdated(book_id: str):
         )
 
 
-@dataclass(frozen=True)
-class LoadedBook:
-    """A book plus everything derived from it that is the same on every request."""
-
-    book: Book
-    toc_index: dict[str, int]  # TOC href -> chapter index; read-only, shared between requests
-
-
-@lru_cache(maxsize=16)
-def _load_book(folder_name: str, mtime_ns: int) -> LoadedBook | None:
-    # mtime_ns is unused in the body; it is part of the cache key so a reprocessed book is reloaded
-    try:
-        book = load_book_file(os.path.join(BOOKS_DIR, folder_name))
-    except Exception:
-        log.exception("Error loading book %s", folder_name)
-        return None
-    return LoadedBook(book, _toc_index_map(book))
-
-
-def load_loaded_book(folder_name: str) -> LoadedBook | None:
-    """
-    Loads the book from book.json together with its derived data.
-    Cached so we don't re-read or re-derive anything on every click, but the cache is
-    invalidated whenever book.json changes (e.g. the book is reprocessed).
-    """
-    if not _is_valid_book_id(folder_name):
-        return None
-    file_path = os.path.join(BOOKS_DIR, folder_name, BOOK_FILE)
-    try:
-        mtime_ns = os.stat(file_path).st_mtime_ns
-    except OSError:
-        return None
-    return _load_book(folder_name, mtime_ns)
-
-
-def load_book_cached(folder_name: str) -> Book | None:
-    loaded = load_loaded_book(folder_name)
-    return loaded.book if loaded else None
-
-
-def _toc_index_map(book: Book) -> dict[str, int]:
-    """
-    Maps every TOC href to the index of the chapter it opens: the exact chapter
-    (file#anchor) if there is one, otherwise the first chapter of that file.
-    """
-    exact: dict[str, int] = {}
-    first_in_file: dict[str, int] = {}
-    for idx, chapter in enumerate(book.spine):
-        exact.setdefault(chapter.href, idx)
-        first_in_file.setdefault(chapter.href.split("#")[0], idx)
-
-    result: dict[str, int] = {}
-
-    def walk(entries: list[TOCEntry]):
-        for entry in entries:
-            idx = exact.get(entry.href, first_in_file.get(entry.file_href))
-            if idx is not None:
-                result[entry.href] = idx
-            walk(entry.children)
-
-    walk(book.toc)
-    return result
-
-
 @app.get("/", response_class=HTMLResponse)
 def library_view(request: Request):
     """Lists all available processed books."""
-    books = []
-
-    # Folders ending in '_data'; the title etc. come from the small meta.json, not the whole book
-    if os.path.isdir(BOOKS_DIR):
-        for item in sorted(os.listdir(BOOKS_DIR)):
-            folder_path = os.path.join(BOOKS_DIR, item)
-            if not (item.endswith("_data") and os.path.isdir(folder_path)):
-                continue
-            meta = read_summary(folder_path)
-            if meta:
-                books.append(
-                    {
-                        "id": item,
-                        "title": meta["title"],
-                        "author": ", ".join(meta.get("authors", [])),
-                        "chapters": meta.get("chapters", 0),
-                        "has_cover": bool(meta.get("cover_image")),
-                        "outdated": False,
-                    }
-                )
-            elif is_legacy_book(folder_path):
-                books.append(
-                    {
-                        "id": item,
-                        "title": item[: -len("_data")],
-                        "author": "",
-                        "chapters": 0,
-                        "has_cover": False,
-                        "outdated": True,
-                    }
-                )
-
-    return templates.TemplateResponse(request, "library.html", {"books": books})
+    return templates.TemplateResponse(request, "library.html", {"books": library.list_books()})
 
 
 @app.get("/read/{book_id}/images/{image_name}")
@@ -245,7 +131,7 @@ def _resolve_chapter(book: Book, ref: str) -> int | None:
 @app.get("/read/{book_id}/{chapter_ref:path}", response_class=HTMLResponse)
 def read_chapter(request: Request, book_id: str, chapter_ref: str):
     """The main reader interface. Accepts either integer index or filename."""
-    loaded = load_loaded_book(book_id)
+    loaded = library.load_loaded_book(book_id)
     if not loaded:
         _raise_if_outdated(book_id)
         raise HTTPException(status_code=404, detail="Book not found")
