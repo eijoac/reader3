@@ -6,7 +6,7 @@ if (activeLink) activeLink.scrollIntoView({ block: 'center' });
 function toggleSidebar() {
     const isHidden = document.body.classList.toggle('sidebar-hidden');
     try { 
-        localStorage.setItem('sidebarHidden', isHidden ? '1' : '0'); 
+        localStorage.setItem('reader3:sidebarHidden', isHidden ? '1' : '0');
     } catch (e) {}
 }
 document.getElementById('toc-toggle').addEventListener('click', toggleSidebar);
@@ -14,7 +14,9 @@ document.getElementById('toc-toggle').addEventListener('click', toggleSidebar);
 // Initialize state from localStorage
 (function initSidebarState() {
     try {
-        const hidden = localStorage.getItem('sidebarHidden') === '1';
+        // Falls back to the key used before it got the reader3: prefix
+        const stored = localStorage.getItem('reader3:sidebarHidden') ?? localStorage.getItem('sidebarHidden');
+        const hidden = stored === '1';
         if (hidden) {
             document.body.classList.add('sidebar-hidden');
         }

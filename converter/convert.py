@@ -288,7 +288,6 @@ def save_book(book: Book, output_dir: str):
     for name, data in ((BOOK_FILE, book_to_dict(book)), (META_FILE, book_summary(book))):
         with open(os.path.join(output_dir, name), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
-    log.info("Saved structured data to %s", os.path.join(output_dir, BOOK_FILE))
 
 
 def convert_epub(epub_path: str, output_dir: str) -> Book:
@@ -326,4 +325,5 @@ def convert_epub(epub_path: str, output_dir: str) -> Book:
         raise
 
     shutil.rmtree(backup_dir, ignore_errors=True)
+    log.info("Saved structured data to %s", os.path.join(output_dir, BOOK_FILE))
     return book
