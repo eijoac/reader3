@@ -4,6 +4,7 @@ Parses an EPUB file into a structured object that can be used to serve the book 
 
 import os
 import pickle
+import posixpath
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -188,7 +189,31 @@ def get_fallback_toc(book_obj) -> List[TOCEntry]:
     return toc
 
 
-def extract_cover_image(book_obj, images_dir: str, image_map: Dict[str, str]) -> Optional[str]:
+def _unique_image_name(item_name: str, used_names: set, prefix: str = "") -> str:
+    """
+    Filesystem-safe name for an image, unique within the book.
+    Images in different EPUB folders can share a basename (a/1.png, b/1.png), and
+    different names can sanitize to the same string, so a numeric suffix is added on collision.
+    """
+    clean = "".join(c for c in os.path.basename(item_name) if c.isalnum() or c in '._-').strip() or "image"
+    stem, ext = os.path.splitext(clean)
+    name = prefix + clean
+    counter = 2
+    while name.lower() in used_names:  # case-insensitive: the output may live on a case-insensitive filesystem
+        name = f"{prefix}{stem}_{counter}{ext}"
+        counter += 1
+    used_names.add(name.lower())
+    return name
+
+
+def _save_cover(item, images_dir: str, used_names: set) -> str:
+    name = _unique_image_name(item.get_name(), used_names, prefix="cover_")
+    with open(os.path.join(images_dir, name), 'wb') as f:
+        f.write(item.get_content())
+    return f"images/{name}"
+
+
+def extract_cover_image(book_obj, images_dir: str, used_names: set) -> Optional[str]:
     """
     Extracts the cover image from the epub.
     Tries multiple methods to find the cover.
@@ -203,12 +228,7 @@ def extract_cover_image(book_obj, images_dir: str, image_map: Dict[str, str]) ->
                 break
         
         if cover_item:
-            original_fname = os.path.basename(cover_item.get_name())
-            safe_fname = "cover_" + "".join([c for c in original_fname if c.isalpha() or c.isdigit() or c in '._-']).strip()
-            local_path = os.path.join(images_dir, safe_fname)
-            with open(local_path, 'wb') as f:
-                f.write(cover_item.get_content())
-            return f"images/{safe_fname}"
+            return _save_cover(cover_item, images_dir, used_names)
     except Exception as e:
         print(f"Method 1 (ITEM_COVER) failed: {e}")
     
@@ -220,12 +240,7 @@ def extract_cover_image(book_obj, images_dir: str, image_map: Dict[str, str]) ->
             if cover_id:
                 for item in book_obj.get_items():
                     if item.get_id() == cover_id or item.get_name().endswith(cover_id):
-                        original_fname = os.path.basename(item.get_name())
-                        safe_fname = "cover_" + "".join([c for c in original_fname if c.isalpha() or c.isdigit() or c in '._-']).strip()
-                        local_path = os.path.join(images_dir, safe_fname)
-                        with open(local_path, 'wb') as f:
-                            f.write(item.get_content())
-                        return f"images/{safe_fname}"
+                        return _save_cover(item, images_dir, used_names)
     except Exception as e:
         print(f"Method 2 (metadata cover) failed: {e}")
     
@@ -235,23 +250,13 @@ def extract_cover_image(book_obj, images_dir: str, image_map: Dict[str, str]) ->
         if item.get_type() == ebooklib.ITEM_IMAGE:
             name = item.get_name().lower()
             if any(pattern.lower() in name for pattern in cover_patterns):
-                original_fname = os.path.basename(item.get_name())
-                safe_fname = "cover_" + "".join([c for c in original_fname if c.isalpha() or c.isdigit() or c in '._-']).strip()
-                local_path = os.path.join(images_dir, safe_fname)
-                with open(local_path, 'wb') as f:
-                    f.write(item.get_content())
-                return f"images/{safe_fname}"
+                return _save_cover(item, images_dir, used_names)
     
     # Method 4: Get the first image as a fallback
     for item in book_obj.get_items():
         if item.get_type() == ebooklib.ITEM_IMAGE:
-            original_fname = os.path.basename(item.get_name())
-            safe_fname = "cover_" + "".join([c for c in original_fname if c.isalpha() or c.isdigit() or c in '._-']).strip()
-            local_path = os.path.join(images_dir, safe_fname)
-            with open(local_path, 'wb') as f:
-                f.write(item.get_content())
             print("Warning: Using first image as cover (no explicit cover found)")
-            return f"images/{safe_fname}"
+            return _save_cover(item, images_dir, used_names)
     
     return None
 
@@ -489,7 +494,9 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
     # 4. Extract Cover Image First
     print("Extracting cover image...")
     image_map = {} # Key: internal_path, Value: local_relative_path
-    cover_path = extract_cover_image(book, images_dir, image_map)
+    used_image_names: set = set()
+    basename_targets: Dict[str, List[str]] = {}
+    cover_path = extract_cover_image(book, images_dir, used_image_names)
     if cover_path:
         metadata.cover_image = cover_path
         print(f"Cover extracted: {cover_path}")
@@ -501,21 +508,20 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
 
     for item in book.get_items():
         if item.get_type() in (ebooklib.ITEM_IMAGE, ebooklib.ITEM_COVER):
-            # Normalize filename
-            original_fname = os.path.basename(item.get_name())
-            # Sanitize filename for OS
-            safe_fname = "".join([c for c in original_fname if c.isalpha() or c.isdigit() or c in '._-']).strip()
+            safe_fname = _unique_image_name(item.get_name(), used_image_names)
 
-            # Save to disk
             local_path = os.path.join(images_dir, safe_fname)
             with open(local_path, 'wb') as f:
                 f.write(item.get_content())
 
-            # Map keys: We try both the full internal path and just the basename
-            # to be robust against messy HTML src attributes
             rel_path = f"images/{safe_fname}"
             image_map[item.get_name()] = rel_path
-            image_map[original_fname] = rel_path
+            basename_targets.setdefault(os.path.basename(item.get_name()), []).append(rel_path)
+
+    # Basename-only lookup is a fallback for sloppy src attributes; it is only safe when unambiguous
+    for basename, targets in basename_targets.items():
+        if len(targets) == 1:
+            image_map.setdefault(basename, targets[0])
 
     # 6. Process TOC
     print("Parsing Table of Contents...")
@@ -550,12 +556,12 @@ def process_epub(epub_path: str, output_dir: str) -> Book:
                     src = img.get(attr, '')
                     if not src:
                         continue
-                    src_decoded = unquote(src)
-                    filename = os.path.basename(src_decoded)
-                    if src_decoded in image_map:
-                        img[attr] = image_map[src_decoded]
-                    elif filename in image_map:
-                        img[attr] = image_map[filename]
+                    src_decoded = unquote(src).split('#', 1)[0].split('?', 1)[0]
+                    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(name), src_decoded))
+                    for candidate in (resolved, src_decoded, posixpath.basename(src_decoded)):
+                        if candidate in image_map:
+                            img[attr] = image_map[candidate]
+                            break
 
             # Fix Internal Links - rewrite to use a placeholder that will be replaced later
             # We'll use a special format: __INTERNAL_LINK__filename#anchor
