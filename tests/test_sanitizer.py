@@ -1,7 +1,7 @@
 import pytest
 from bs4 import BeautifulSoup
 
-from reader3 import _url_scheme, clean_html_content
+from converter.sanitize import clean_html_content, url_scheme
 
 
 def clean(html: str) -> str:
@@ -19,8 +19,8 @@ def clean(html: str) -> str:
     ("#frag", None),
     ("../img/a.png", None),
 ])
-def test_url_scheme(value, expected):
-    assert _url_scheme(value) == expected
+def testurl_scheme(value, expected):
+    assert url_scheme(value) == expected
 
 
 @pytest.mark.parametrize("html", [

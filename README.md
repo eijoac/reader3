@@ -38,6 +38,13 @@ And visit [localhost:8123](http://localhost:8123/) to see your current Library. 
 - The A / A buttons (top right) change the text size and `Aa` switches the font; both choices are remembered.
 - Dark mode follows your system setting until you pick one with the toggle.
 
+## Project layout
+
+- `reader3.py` – command-line entry point (a thin wrapper around `converter/cli.py`).
+- `converter/` – EPUB conversion: `convert.py` (pipeline), `sanitize.py`, `toc.py`, `images.py`, `slicing.py`, `metadata.py`, and `models.py` / `storage.py` (the on-disk book format).
+- `server.py` – the web reader (FastAPI).
+- `templates/` – Jinja pages; `static/` – their CSS and JavaScript (`theme.js` is shared by both pages).
+
 ## Tests
 
 ```bash

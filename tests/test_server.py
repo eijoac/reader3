@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-import reader3
+from converter import storage
 import server
 
 
@@ -127,15 +127,36 @@ def test_library_page_does_not_load_books(client, monkeypatch):
 
 def test_roundtrip_through_json_is_lossless(converted):
     book, out = converted
-    assert reader3.load_book_file(str(out)) == book
+    assert storage.load_book_file(str(out)) == book
+
+
+def _reader_config(html: str) -> dict:
+    m = re.search(r"window\.READER_CONFIG = (\{.*?\});", html, re.S)
+    return json.loads(m.group(1).replace("\\u0026", "&").replace("\\u0027", "'").replace("\\u003c", "<").replace("\\u003e", ">"))
+
+
+def test_static_assets_are_served(client):
+    for path, marker in [("theme.js", "toggleTheme"), ("reader.js", "READER_CONFIG"),
+                         ("reader.css", "--font-scale"), ("library.js", "read-btn"), ("library.css", "book-grid")]:
+        r = client.get(f"/static/{path}")
+        assert r.status_code == 200 and marker in r.text, path
+    assert client.get("/static/../server.py").status_code == 404
+
+
+def test_pages_have_no_inline_styles_or_big_scripts(client):
+    for url in ("/", "/read/Test_data/0"):
+        html = client.get(url).text
+        assert "<style" not in html
+        assert "/static/theme.js" in html
 
 
 def test_reader_has_theme_keyboard_and_position_hooks(client):
     html = client.get("/read/Test_data/2").text
     assert 'id="theme-toggle"' in html
-    assert 'const PREV_URL = "/read/Test_data/1"' in html
-    assert 'const NEXT_URL = "/read/Test_data/3"' in html
-    assert 'const BOOK_ID = "Test_data"' in html
+    config = _reader_config(html)
+    assert config == {"bookId": "Test_data", "chapter": 2,
+                      "prevUrl": "/read/Test_data/1", "nextUrl": "/read/Test_data/3"}
+    assert '/static/reader.js' in html and '/static/theme.js' in html
 
 
 def test_reader_has_font_controls_and_book_language(client):
@@ -156,8 +177,9 @@ def test_reader_language_comes_from_the_book_and_is_escaped(client, library):
 
 def test_reader_keyboard_urls_are_null_at_the_ends(client, converted):
     book, _ = converted
-    assert "const PREV_URL = null" in client.get("/read/Test_data/0").text
-    assert "const NEXT_URL = null" in client.get(f"/read/Test_data/{len(book.spine) - 1}").text
+    assert _reader_config(client.get("/read/Test_data/0").text)["prevUrl"] is None
+    last = client.get(f"/read/Test_data/{len(book.spine) - 1}").text
+    assert _reader_config(last)["nextUrl"] is None
 
 
 def test_library_button_carries_data_for_resume(client):

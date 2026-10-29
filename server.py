@@ -2,6 +2,7 @@ import logging
 import os
 import posixpath
 import re
+from pathlib import Path
 from dataclasses import replace
 from functools import lru_cache
 from typing import Dict, List, Optional
@@ -9,16 +10,19 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from reader3 import (
-    BOOK_FILE, Book, TOCEntry, is_legacy_book, load_book_file, read_summary,
-)
+from converter.models import Book, TOCEntry
+from converter.storage import BOOK_FILE, is_legacy_book, load_book_file, read_summary
 
 log = logging.getLogger("uvicorn.error")  # shares uvicorn's handlers, so messages show up in the console
 
+BASE_DIR = Path(__file__).resolve().parent
+
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 # Where are the book folders located?
 BOOKS_DIR = "library"

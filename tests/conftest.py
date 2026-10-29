@@ -8,7 +8,7 @@ from ebooklib import epub
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import reader3  # noqa: E402
+from converter import convert  # noqa: E402
 
 
 def png(tag: str) -> bytes:
@@ -93,7 +93,7 @@ def epub_path(tmp_path_factory) -> Path:
 @pytest.fixture(scope="session")
 def converted(tmp_path_factory, epub_path):
     out = tmp_path_factory.mktemp("lib") / "Test_data"
-    book = reader3.convert_epub(str(epub_path), str(out))
+    book = convert.convert_epub(str(epub_path), str(out))
     return book, out
 
 
