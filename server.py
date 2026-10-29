@@ -127,7 +127,7 @@ async def library_view(request: Request):
                         "has_cover": book.metadata.cover_image is not None
                     })
 
-    return templates.TemplateResponse("library.html", {"request": request, "books": books})
+    return templates.TemplateResponse(request, "library.html", {"books": books})
 
 @app.get("/read/{book_id}/images/{image_name}")
 async def serve_image(book_id: str, image_name: str):
@@ -195,8 +195,7 @@ async def read_chapter(request: Request, book_id: str, chapter_ref: str):
     prev_idx = chapter_index - 1 if chapter_index > 0 else None
     next_idx = chapter_index + 1 if chapter_index < len(book.spine) - 1 else None
 
-    return templates.TemplateResponse("reader.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "reader.html", {
         "book": book,
         "current_chapter": current_chapter,
         "chapter_index": chapter_index,

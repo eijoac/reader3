@@ -22,6 +22,14 @@ uv run server.py
 
 And visit [localhost:8123](http://localhost:8123/) to see your current Library. You can easily add more books, or delete them from your library by deleting the folder. It's not supposed to be complicated or complex.
 
+## Tests
+
+```bash
+uv run pytest
+```
+
+The tests build small synthetic EPUBs, so they don't need any books in `library/`.
+
 ## License
 
 MIT
