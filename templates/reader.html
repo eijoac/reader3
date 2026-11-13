@@ -9,16 +9,17 @@
 </head>
 <body>
     <!-- TOC Toggle Button -->
-    <button class="toc-toggle-btn" id="toc-toggle" data-tooltip="Toggle Table of Contents">
-        <div class="hamburger">
+    <button class="toc-toggle-btn" id="toc-toggle" type="button" aria-label="Toggle table of contents"
+            aria-controls="sidebar" aria-expanded="true" data-tooltip="Toggle Table of Contents">
+        <span class="hamburger" aria-hidden="true">
             <span></span>
             <span></span>
             <span></span>
-        </div>
+        </span>
     </button>
 
     <!-- Theme toggle -->
-    <div class="reader-controls">
+    <div class="reader-controls" role="group" aria-label="Reading settings">
         <button class="ctl-btn small" id="font-smaller" type="button" title="Smaller text (-)" aria-label="Smaller text">A</button>
         <button class="ctl-btn large" id="font-larger" type="button" title="Larger text (+)" aria-label="Larger text">A</button>
         <button class="ctl-btn" id="font-toggle" type="button" title="Switch serif / sans-serif (f)" aria-label="Switch between serif and sans-serif font">Aa</button>
@@ -28,9 +29,20 @@
     </div>
 
     <!-- SIDEBAR -->
-    <div id="sidebar">
+    <button class="sidebar-backdrop" id="sidebar-backdrop" type="button" aria-label="Close table of contents"></button>
+    <nav id="sidebar" aria-label="Table of contents">
         <a href="/" class="nav-home">← Back to Library</a>
-        <div class="nav-header">{{ book.metadata.title }}</div>
+        <h2 class="nav-header">{{ book.metadata.title }}</h2>
+
+        <form id="book-search-form" class="book-search" role="search">
+            <label for="book-search">Search this book</label>
+            <div class="book-search-controls">
+                <input id="book-search" name="q" type="search" maxlength="120" autocomplete="off">
+                <button type="submit">Search</button>
+            </div>
+        </form>
+        <p id="search-status" class="search-status" role="status" aria-live="polite"></p>
+        <ul id="search-results" class="search-results" aria-label="Search results"></ul>
 
         <!-- Recursive Macro for TOC -->
         {% macro render_toc(items) %}
@@ -58,20 +70,20 @@
         {% endmacro %}
 
         {{ render_toc(book.toc) }}
-    </div>
+    </nav>
 
     <!-- MAIN CONTENT -->
-    <div id="main" tabindex="-1">
+    <main id="main" tabindex="-1" aria-label="Book content">
         <div class="content-container">
-            <div class="book-content">
+            <article class="book-content">
                 {{ current_chapter.content | safe }}
-            </div>
+            </article>
 
-            <div class="chapter-nav">
+            <nav class="chapter-nav" aria-label="Chapter navigation">
                 {% if prev_idx is not none %}
                     <a href="/read/{{ book_url }}/{{ prev_idx }}" class="nav-btn">← Previous</a>
                 {% else %}
-                    <span class="nav-btn disabled">← Previous</span>
+                    <span class="nav-btn disabled" aria-disabled="true">← Previous</span>
                 {% endif %}
 
                 <span class="section-count">
@@ -81,11 +93,11 @@
                 {% if next_idx is not none %}
                     <a href="/read/{{ book_url }}/{{ next_idx }}" class="nav-btn">Next →</a>
                 {% else %}
-                    <span class="nav-btn disabled">Next →</span>
+                    <span class="nav-btn disabled" aria-disabled="true">Next →</span>
                 {% endif %}
-            </div>
+            </nav>
         </div>
-    </div>
+    </main>
 
     <script type="application/json" id="reader-config">
         {{ {
@@ -93,6 +105,7 @@
             "chapter": chapter_index,
             "prevUrl": ('/read/' ~ book_url ~ '/' ~ prev_idx) if prev_idx is not none else none,
             "nextUrl": ('/read/' ~ book_url ~ '/' ~ next_idx) if next_idx is not none else none,
+            "searchUrl": ('/read/' ~ book_url ~ '/search'),
         } | tojson }}
     </script>
     <script src="{{ static_url('reader.js') }}"></script>

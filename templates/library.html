@@ -9,45 +9,47 @@
 </head>
 <body>
     <div class="container">
-        <div class="page-header">
+        <header class="page-header">
             <h1>Library</h1>
             <button class="theme-toggle-btn" id="theme-toggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode">
                 <span class="icon-moon">☾</span><span class="icon-sun">☀</span>
             </button>
-        </div>
+        </header>
 
-        {% if not books %}
-            <p>No processed books found. Run <code>reader3.py</code> on an epub first.</p>
-        {% endif %}
+        <main>
+            {% if not books %}
+                <p>No processed books found. Run <code>reader3.py</code> on an epub first.</p>
+            {% endif %}
 
-        <div class="book-grid">
-            {% for book in books %}
-            <div class="book-card">
-                {% if book.has_cover %}
-                <img src="/cover/{{ book.id | urlencode }}" alt="{{ book.title }} cover" class="book-cover">
-                <div class="book-cover-placeholder hidden">📖</div>
-                {% else %}
-                <div class="book-cover-placeholder">📖</div>
-                {% endif %}
-                <div class="book-title">{{ book.title }}</div>
-                {% if book.outdated %}
-                <div class="book-meta">
-                    Converted by an older version.<br>
-                    Run <code>uv run reader3.py reprocess {{ book.title }}</code>
-                </div>
-                {% else %}
-                <div class="book-meta">
-                    {{ book.author }}<br>
-                    {{ book.chapters }} sections
-                </div>
-                <div class="btn-container">
-                    <a href="/read/{{ book.id | urlencode }}/0" class="btn read-btn"
-                       data-book-id="{{ book.id }}" data-chapters="{{ book.chapters }}">Read Book</a>
-                </div>
-                {% endif %}
-            </div>
-            {% endfor %}
-        </div>
+            <section class="book-grid" aria-label="Books">
+                {% for book in books %}
+                <article class="book-card">
+                    {% if book.has_cover %}
+                    <img src="/cover/{{ book.id | urlencode }}" alt="{{ book.title }} cover" class="book-cover">
+                    <div class="book-cover-placeholder hidden" aria-hidden="true">📖</div>
+                    {% else %}
+                    <div class="book-cover-placeholder" aria-hidden="true">📖</div>
+                    {% endif %}
+                    <h2 class="book-title">{{ book.title }}</h2>
+                    {% if book.outdated %}
+                    <div class="book-meta">
+                        Converted by an older version.<br>
+                        Run <code>uv run reader3.py reprocess {{ book.title }}</code>
+                    </div>
+                    {% else %}
+                    <div class="book-meta">
+                        {{ book.author }}<br>
+                        {{ book.chapters }} sections
+                    </div>
+                    <div class="btn-container">
+                        <a href="/read/{{ book.id | urlencode }}/0" class="btn read-btn"
+                           data-book-id="{{ book.id }}" data-chapters="{{ book.chapters }}">Read Book</a>
+                    </div>
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </section>
+        </main>
     </div>
 
     <script src="{{ static_url('library.js') }}"></script>

@@ -55,6 +55,41 @@ def test_chapter_links_are_rewritten(client, converted):
     assert re.search(r'href="/read/Test_data/\d+#b"', html)
 
 
+def test_book_search_returns_case_insensitive_section_snippets(client, converted):
+    book, _ = converted
+    expected_index = next(i for i, chapter in enumerate(book.spine) if "alpha text" in chapter.text)
+    response = client.get("/read/Test_data/search", params={"q": "ALPHA TEXT"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["truncated"] is False
+    assert len(data["results"]) == 1
+    result = data["results"][0]
+    assert result["chapter"] == expected_index
+    assert result["title"] == book.spine[expected_index].title
+    assert "alpha text" in result["snippet"].lower()
+
+
+def test_book_search_handles_blank_and_invalid_queries(client):
+    assert client.get("/read/Test_data/search", params={"q": "   "}).json() == {
+        "results": [],
+        "truncated": False,
+    }
+    assert client.get("/read/Test_data/search", params={"q": "x" * 121}).status_code == 422
+    assert client.get("/read/Missing_data/search", params={"q": "alpha"}).status_code == 404
+
+
+def test_book_search_caps_results(client, monkeypatch):
+    from types import SimpleNamespace
+
+    chapter = SimpleNamespace(title="Match", text="needle")
+    loaded = SimpleNamespace(book=SimpleNamespace(spine=[chapter] * (server.MAX_SEARCH_RESULTS + 1)))
+    monkeypatch.setattr(libmod, "load_loaded_book", lambda book_id: loaded)
+
+    data = client.get("/read/Test_data/search", params={"q": "needle"}).json()
+    assert len(data["results"]) == server.MAX_SEARCH_RESULTS
+    assert data["truncated"] is True
+
+
 def test_images_and_cover_served(client, converted):
     book, _ = converted
     assert client.get("/cover/Test_data").status_code == 200
@@ -200,8 +235,26 @@ def test_reader_has_theme_keyboard_and_position_hooks(client):
         "chapter": 2,
         "prevUrl": "/read/Test_data/1",
         "nextUrl": "/read/Test_data/3",
+        "searchUrl": "/read/Test_data/search",
     }
     assert "/static/reader.js" in html and "/static/theme.js" in html
+
+
+def test_reader_controls_have_accessible_semantics(client):
+    html = client.get("/read/Test_data/2").text
+    assert '<nav id="sidebar" aria-label="Table of contents">' in html
+    assert 'aria-controls="sidebar" aria-expanded="true"' in html
+    assert '<main id="main" tabindex="-1" aria-label="Book content">' in html
+    assert '<label for="book-search">Search this book</label>' in html
+    assert 'id="search-status" class="search-status" role="status" aria-live="polite"' in html
+    assert '<nav class="chapter-nav" aria-label="Chapter navigation">' in html
+
+
+def test_library_uses_landmarks_and_book_articles(client):
+    html = client.get("/").text
+    assert '<header class="page-header">' in html
+    assert "<main>" in html and '<section class="book-grid" aria-label="Books">' in html
+    assert '<article class="book-card">' in html and '<h2 class="book-title">Test Book</h2>' in html
 
 
 def test_reader_has_font_controls_and_book_language(client):

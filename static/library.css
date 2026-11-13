@@ -31,3 +31,21 @@ img.book-cover[hidden] { display: none; }
 .btn-container { text-align: center; }
 
 .book-cover-placeholder.hidden { display: none; }
+
+.book-title { margin-top: 0; }
+.btn:focus-visible, .theme-toggle-btn:focus-visible {
+    outline: 3px solid var(--btn);
+    outline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+    body { padding: 20px 16px; }
+    .book-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 14px; margin-top: 20px; }
+    .book-card { padding: 16px; }
+    .book-cover, .book-cover-placeholder { height: 210px; }
+}
+
+@media (max-width: 360px) {
+    body { padding: 16px 12px; }
+    .book-cover, .book-cover-placeholder { height: 180px; }
+}

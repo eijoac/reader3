@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -62,6 +62,8 @@ templates = make_templates(BASE_DIR / "templates")
 
 # Placeholder written by reader3.py: __CHAPTER__<spine index>[#fragment]
 CHAPTER_LINK_RE = re.compile(r'href=["\']__CHAPTER__([0-9]+)(#[^"\']*)?["\']')
+MAX_SEARCH_RESULTS = 50
+SEARCH_CONTEXT_CHARS = 80
 
 
 def _book_dir(book_id: str) -> str:
@@ -108,6 +110,45 @@ def redirect_to_first_chapter(book_id: str):
     """Canonical URL for a book is its first chapter."""
     _book_dir(book_id)
     return RedirectResponse(f"/read/{quote(book_id, safe='')}/0")
+
+
+@app.get("/read/{book_id}/search")
+def search_book(book_id: str, q: str = Query(min_length=1, max_length=120)):
+    """Search chapter text and return a bounded set of plain-text snippets."""
+    loaded = library.load_loaded_book(book_id)
+    if not loaded:
+        _raise_if_outdated(book_id)
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    query = q.strip()
+    if not query:
+        return {"results": [], "truncated": False}
+
+    results = []
+    truncated = False
+    for chapter_index, chapter in enumerate(loaded.book.spine):
+        match = re.search(re.escape(query), chapter.text, re.IGNORECASE)
+        if match is None:
+            continue
+        if len(results) == MAX_SEARCH_RESULTS:
+            truncated = True
+            break
+        start = max(0, match.start() - SEARCH_CONTEXT_CHARS)
+        end = min(len(chapter.text), match.end() + SEARCH_CONTEXT_CHARS)
+        snippet = chapter.text[start:end]
+        if start:
+            snippet = "..." + snippet
+        if end < len(chapter.text):
+            snippet += "..."
+        results.append(
+            {
+                "chapter": chapter_index,
+                "title": chapter.title,
+                "snippet": snippet,
+            }
+        )
+
+    return {"results": results, "truncated": truncated}
 
 
 def _resolve_chapter(book: Book, ref: str) -> int | None:
