@@ -42,7 +42,7 @@ For safety, book content is sanitized and the server sends a strict Content-Secu
 - Keyboard: `←` / `→` previous / next section, `t` show/hide the contents, `d` toggle dark mode, `f` switch serif / sans-serif, `+` / `-` text size.
 - The A / A buttons (top right) change the text size and `Aa` switches the font; both choices are remembered.
 - Dark mode follows your system setting until you pick one with the toggle.
-- Use **Search this book** in the table of contents to find text across its sections.
+- Use **Search this book** in the table of contents to find text across its sections. Select a result to jump to the section, highlight the match, and scroll it into view.
 
 ## Project layout
 

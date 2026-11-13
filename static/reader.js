@@ -119,7 +119,16 @@ searchForm.addEventListener('submit', async (event) => {
             const item = document.createElement('li');
             const link = document.createElement('a');
             link.className = 'search-result-link';
-            link.href = `/read/${encodeURIComponent(BOOK_ID)}/${result.chapter}`;
+            const destination = new URL(`/read/${encodeURIComponent(BOOK_ID)}/${result.chapter}`, location.origin);
+            destination.searchParams.set('highlight', query);
+            link.href = destination.pathname + destination.search;
+            link.addEventListener('click', () => {
+                if (!mobileLayout.matches) return;
+                setSidebarHidden(true);
+                try {
+                    localStorage.setItem('reader3:sidebarHidden', '1');
+                } catch (e) {}
+            });
 
             const title = document.createElement('span');
             title.className = 'search-result-title';
@@ -150,6 +159,86 @@ searchForm.addEventListener('submit', async (event) => {
         }
     }
 });
+
+function highlightSearchMatch(query) {
+    const root = document.querySelector('.book-content');
+    if (!root || !query || query.length > 120) return;
+
+    const textNodes = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+    const characters = [];
+    const positions = [];
+    function appendCharacter(character, node, offset) {
+        if (/\s/.test(character)) {
+            if (characters.at(-1) === ' ') return;
+            characters.push(' ');
+            positions.push(node ? { node, offset } : null);
+            return;
+        }
+        characters.push(character);
+        positions.push({ node, offset });
+    }
+
+    textNodes.forEach((node, nodeIndex) => {
+        if (nodeIndex) appendCharacter(' ', null, 0);
+        for (let offset = 0; offset < node.textContent.length; offset++) {
+            appendCharacter(node.textContent[offset], node, offset);
+        }
+    });
+
+    const text = characters.join('');
+    const match = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'iu').exec(text);
+    if (!match) return;
+
+    const groups = [];
+    for (let index = match.index; index < match.index + match[0].length; index++) {
+        const position = positions[index];
+        if (!position) continue;
+        const last = groups.at(-1);
+        if (last && last.node === position.node && last.end === position.offset) {
+            last.end++;
+        } else {
+            groups.push({ node: position.node, start: position.offset, end: position.offset + 1 });
+        }
+    }
+
+    const marks = groups.map(({ node, start, end }) => {
+        const matchedText = node.splitText(start);
+        matchedText.splitText(end - start);
+        const mark = document.createElement('mark');
+        mark.className = 'search-highlight';
+        matchedText.parentNode.replaceChild(mark, matchedText);
+        mark.append(matchedText);
+        return mark;
+    });
+    const firstMark = marks[0];
+    if (!firstMark) return;
+
+    const scrollToMatch = () => firstMark.scrollIntoView({
+        block: 'center',
+        behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    });
+    let interacted = false;
+    ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach((event) =>
+        main.addEventListener(event, () => { interacted = true; }, { once: true, passive: true }));
+    scrollToMatch();
+    window.addEventListener('load', () => {
+        if (!interacted && firstMark.isConnected) scrollToMatch();
+    }, { once: true });
+
+    window.setTimeout(() => {
+        marks.forEach((mark) => {
+            if (mark.isConnected) mark.replaceWith(...mark.childNodes);
+        });
+    }, 5000);
+}
+
+const highlightQuery = new URLSearchParams(location.search).get('highlight');
+if (highlightQuery) {
+    highlightSearchMatch(highlightQuery);
+}
 
 // Reading position: remember the last chapter and how far down it the reader was
 // Per-page data comes from a JSON block in reader.html (not executed, so a strict CSP allows it)
@@ -184,7 +273,7 @@ function restoreScroll(frac) {
 (function initReadingPosition() {
     const saved = readPosition();
     // Only resume the same chapter, and never fight an in-page #anchor link
-    const resume = saved && saved.chapter === CHAPTER && !location.hash ? saved.frac : null;
+    const resume = saved && saved.chapter === CHAPTER && !location.hash && !highlightQuery ? saved.frac : null;
     let interacted = false;
     ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach(evt =>
         main.addEventListener(evt, () => { interacted = true; }, { passive: true }));

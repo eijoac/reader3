@@ -8,6 +8,7 @@
     --sidebar-bg: #f8f9fa; --border: #e9ecef; --border-strong: #dee2e6; --rule: #eee;
     --hover-bg: #e9ecef; --hover-text: #000; --link: #3498db; --active-bg: #d63384;
     --control-bg: #fff; --control-hover: #f8f9fa; --shadow: rgba(0,0,0,0.1); --shadow-strong: rgba(0,0,0,0.15);
+    --search-highlight-bg: #ffe66d; --search-highlight-text: #212529;
 }
 :root[data-font="sans"] { --reading-font: var(--font-sans); }
 :root[data-theme="dark"] {
@@ -16,6 +17,7 @@
     --sidebar-bg: #212327; --border: #30333a; --border-strong: #3a3d45; --rule: #30333a;
     --hover-bg: #2c2f36; --hover-text: #fff; --link: #6cb6ff; --active-bg: #b02a6b;
     --control-bg: #2a2c31; --control-hover: #34373e; --shadow: rgba(0,0,0,0.4); --shadow-strong: rgba(0,0,0,0.5);
+    --search-highlight-bg: #795b00; --search-highlight-text: #fff3c4;
 }
 /* Layout */
 body { margin: 0; padding: 0; display: flex; height: 100vh; overflow: hidden; font-family: var(--font-sans); background: var(--bg); color: var(--text); }
@@ -49,6 +51,7 @@ body { margin: 0; padding: 0; display: flex; height: 100vh; overflow: hidden; fo
 .search-result-title, .search-result-snippet { display: block; }
 .search-result-title { margin-bottom: 4px; color: var(--link); font-size: 0.88rem; font-weight: 600; }
 .search-result-snippet { font-size: 0.82rem; line-height: 1.4; }
+.book-content mark.search-highlight { color: var(--search-highlight-text); background: var(--search-highlight-bg); border-radius: 2px; padding: 0 0.08em; }
 
 /* TOC Tree */
 ul.toc-list { list-style: none; padding-left: 0; margin: 0; }
