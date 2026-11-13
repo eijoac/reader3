@@ -43,6 +43,7 @@ For safety, book content is sanitized and the server sends a strict Content-Secu
 - The A / A buttons (top right) change the text size and `Aa` switches the font; both choices are remembered.
 - Dark mode follows your system setting until you pick one with the toggle.
 - Use **Search this book** in the table of contents to find text across its sections. Select a result to jump to the section, highlight the match, and scroll it into view.
+- The table of contents starts with a Cover link and includes section 2 by its title when the book's own TOC doesn't already link to it.
 
 ## Project layout
 

@@ -47,6 +47,21 @@ def test_toc_links_are_real_and_active_is_marked(client):
     assert "aria-current" in active[0]
 
 
+def test_toc_starts_with_cover_and_unlinked_second_section(client, library):
+    book_path = library / "Test_data" / "book.json"
+    data = json.loads(book_path.read_text())
+    data["toc"] = data["toc"][1:]
+    book_path.write_text(json.dumps(data))
+
+    html = client.get("/read/Test_data/0").text
+    cover = html.index('<a href="/read/Test_data/0"')
+    second_section = html.index('<a href="/read/Test_data/1"')
+    regular_toc = html.index('<a href="/read/Test_data/2"')
+    assert cover < second_section < regular_toc
+    assert "Cover" in html[cover : html.index("</a>", cover)]
+    assert "Part A" in html[second_section : html.index("</a>", second_section)]
+
+
 def test_chapter_links_are_rewritten(client, converted):
     book, _ = converted
     two_index = next(i for i, c in enumerate(book.spine) if c.title == "Two")

@@ -44,6 +44,20 @@
         <p id="search-status" class="search-status" role="status" aria-live="polite"></p>
         <ul id="search-results" class="search-results" aria-label="Search results"></ul>
 
+        {% if front_matter_links %}
+            <ul class="toc-list front-matter-list">
+            {% for item in front_matter_links %}
+                <li class="toc-item">
+                    <a href="/read/{{ book_url }}/{{ item.index }}"
+                       class="toc-link {% if item.index == chapter_index %}active{% endif %}"
+                       {% if item.index == chapter_index %}aria-current="page"{% endif %}>
+                        {{ item.title }}
+                    </a>
+                </li>
+            {% endfor %}
+            </ul>
+        {% endif %}
+
         <!-- Recursive Macro for TOC -->
         {% macro render_toc(items) %}
             <ul class="toc-list">

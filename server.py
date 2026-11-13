@@ -197,6 +197,12 @@ def read_chapter(request: Request, book_id: str, chapter_ref: str):
     # Calculate Prev/Next links
     prev_idx = chapter_index - 1 if chapter_index > 0 else None
     next_idx = chapter_index + 1 if chapter_index < len(book.spine) - 1 else None
+    toc_targets = set(loaded.toc_index.values())
+    front_matter_links = []
+    if book.spine:
+        front_matter_links.append({"index": 0, "title": "Cover"})
+    if len(book.spine) > 1 and 1 not in toc_targets:
+        front_matter_links.append({"index": 1, "title": book.spine[1].title})
 
     return templates.TemplateResponse(
         request,
@@ -208,6 +214,7 @@ def read_chapter(request: Request, book_id: str, chapter_ref: str):
             "book_id": book_id,
             "book_url": book_url,
             "toc_index": loaded.toc_index,
+            "front_matter_links": front_matter_links,
             "prev_idx": prev_idx,
             "next_idx": next_idx,
         },
